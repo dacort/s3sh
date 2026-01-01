@@ -52,8 +52,9 @@ impl ArchiveIndex {
     /// Look up an entry, trying both with and without trailing slash
     /// Tar archives often store directories with trailing slashes
     pub fn find_entry(&self, path: &str) -> Option<&ArchiveEntry> {
-        self.entries.get(path)
-            .or_else(|| self.entries.get(&format!("{}/", path)))
+        self.entries
+            .get(path)
+            .or_else(|| self.entries.get(&format!("{path}/")))
     }
 }
 
@@ -65,15 +66,10 @@ pub enum VfsNode {
     Root,
 
     /// An S3 bucket
-    Bucket {
-        name: String,
-    },
+    Bucket { name: String },
 
     /// A prefix within an S3 bucket (acts like a directory)
-    Prefix {
-        bucket: String,
-        prefix: String,
-    },
+    Prefix { bucket: String, prefix: String },
 
     /// An S3 object (file)
     Object {
@@ -110,8 +106,11 @@ impl VfsNode {
     pub fn is_listable(&self) -> bool {
         matches!(
             self,
-            VfsNode::Root | VfsNode::Bucket { .. } | VfsNode::Prefix { .. } |
-            VfsNode::Archive { .. } | VfsNode::ArchiveEntry { is_dir: true, .. }
+            VfsNode::Root
+                | VfsNode::Bucket { .. }
+                | VfsNode::Prefix { .. }
+                | VfsNode::Archive { .. }
+                | VfsNode::ArchiveEntry { is_dir: true, .. }
         )
     }
 

@@ -1,11 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::sync::Arc;
 
 use super::{Command, ShellState};
+use crate::archive::ArchiveHandler;
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
-use crate::archive::ArchiveHandler;
 use crate::ui::create_spinner;
 use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
 
@@ -42,16 +42,16 @@ impl Command for CatCommand {
 
                 // Try to display as UTF-8 text
                 match String::from_utf8(bytes.to_vec()) {
-                    Ok(text) => print!("{}", text),
+                    Ok(text) => print!("{text}"),
                     Err(_) => {
                         eprintln!("Warning: File contains binary data");
                         // Display first 1KB as hex
                         let display_len = bytes.len().min(1024);
                         for (i, byte) in bytes[..display_len].iter().enumerate() {
                             if i % 16 == 0 {
-                                print!("\n{:08x}: ", i);
+                                print!("\n{i:08x}: ");
                             }
-                            print!("{:02x} ", byte);
+                            print!("{byte:02x} ");
                         }
                         println!();
                         if bytes.len() > 1024 {
@@ -68,7 +68,7 @@ impl Command for CatCommand {
                 ..
             } => {
                 if *is_dir {
-                    return Err(anyhow!("Is a directory: {}", path_str));
+                    return Err(anyhow!("Is a directory: {path_str}"));
                 }
 
                 // Get bucket and key from archive
@@ -91,13 +91,13 @@ impl Command for CatCommand {
                 let idx = if let Some(i) = index {
                     Arc::clone(i)
                 } else {
-                    let cache_key = format!("s3://{}/{}", bucket, key);
+                    let cache_key = format!("s3://{bucket}/{key}");
                     if let Some(cached) = state.cache().get(&cache_key) {
                         cached
                     } else {
                         // Show spinner while building index
-                        let filename = key.split('/').last().unwrap_or(key);
-                        let spinner = create_spinner(&format!("Building index for {}...", filename));
+                        let filename = key.split('/').next_back().unwrap_or(key);
+                        let spinner = create_spinner(&format!("Building index for {filename}..."));
 
                         let built = match archive_type {
                             ArchiveType::Zip => {
@@ -123,8 +123,8 @@ impl Command for CatCommand {
                 };
 
                 // Show spinner while extracting file
-                let filename = file_path.split('/').last().unwrap_or(file_path);
-                let spinner = create_spinner(&format!("Extracting {}...", filename));
+                let filename = file_path.split('/').next_back().unwrap_or(file_path);
+                let spinner = create_spinner(&format!("Extracting {filename}..."));
 
                 // Extract the file
                 let bytes = match archive_type {
@@ -150,16 +150,16 @@ impl Command for CatCommand {
 
                 // Try to display as UTF-8 text
                 match String::from_utf8(bytes.to_vec()) {
-                    Ok(text) => print!("{}", text),
+                    Ok(text) => print!("{text}"),
                     Err(_) => {
                         eprintln!("Warning: File contains binary data");
                         // Display first 1KB as hex
                         let display_len = bytes.len().min(1024);
                         for (i, byte) in bytes[..display_len].iter().enumerate() {
                             if i % 16 == 0 {
-                                print!("\n{:08x}: ", i);
+                                print!("\n{i:08x}: ");
                             }
-                            print!("{:02x} ", byte);
+                            print!("{byte:02x} ");
                         }
                         println!();
                         if bytes.len() > 1024 {
@@ -170,7 +170,7 @@ impl Command for CatCommand {
             }
 
             _ => {
-                return Err(anyhow!("Not a file: {}", path_str));
+                return Err(anyhow!("Not a file: {path_str}"));
             }
         }
 
@@ -185,7 +185,7 @@ impl CatCommand {
         let segments = vpath.segments();
 
         if segments.len() < 2 {
-            return Err(anyhow!("Invalid file path: {}", path));
+            return Err(anyhow!("Invalid file path: {path}"));
         }
 
         let bucket = &segments[0];
@@ -216,7 +216,7 @@ impl CatCommand {
             }
 
             VfsNode::Prefix { bucket, prefix } => {
-                let key = format!("{}{}", prefix, path);
+                let key = format!("{prefix}{path}");
                 let metadata = state.s3_client().head_object(bucket, &key).await?;
                 Ok(VfsNode::Object {
                     bucket: bucket.clone(),
@@ -233,8 +233,9 @@ impl CatCommand {
                     return Err(anyhow!("Archive index not available"));
                 };
 
-                let entry = idx.find_entry(path)
-                    .ok_or_else(|| anyhow!("File not found in archive: {}", path))?;
+                let entry = idx
+                    .find_entry(path)
+                    .ok_or_else(|| anyhow!("File not found in archive: {path}"))?;
 
                 Ok(VfsNode::ArchiveEntry {
                     archive: Box::new(current.clone()),
@@ -244,7 +245,11 @@ impl CatCommand {
                 })
             }
 
-            VfsNode::ArchiveEntry { archive, path: current_path, .. } => {
+            VfsNode::ArchiveEntry {
+                archive,
+                path: current_path,
+                ..
+            } => {
                 // Resolve file relative to current path in archive
                 let idx = match archive.as_ref() {
                     VfsNode::Archive { index: Some(i), .. } => Arc::clone(i),
@@ -258,8 +263,9 @@ impl CatCommand {
                     format!("{}/{}", current_path.trim_end_matches('/'), path)
                 };
 
-                let entry = idx.find_entry(&full_path)
-                    .ok_or_else(|| anyhow!("File not found in archive: {}", path))?;
+                let entry = idx
+                    .find_entry(&full_path)
+                    .ok_or_else(|| anyhow!("File not found in archive: {path}"))?;
 
                 Ok(VfsNode::ArchiveEntry {
                     archive: archive.clone(),
@@ -269,7 +275,9 @@ impl CatCommand {
                 })
             }
 
-            _ => Err(anyhow!("Cannot resolve relative path from current location")),
+            _ => Err(anyhow!(
+                "Cannot resolve relative path from current location"
+            )),
         }
     }
 }

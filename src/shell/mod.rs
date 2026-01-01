@@ -1,7 +1,7 @@
 pub mod commands;
 pub mod completion;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -48,9 +48,30 @@ impl ShellState {
         Ok(state)
     }
 
+    /// Create a shell state from components (useful for testing)
+    pub fn from_components(
+        current_node: VfsNode,
+        s3_client: Arc<S3Client>,
+        cache: ArchiveCache,
+        completion_cache: CompletionCache,
+    ) -> Self {
+        ShellState {
+            current_node,
+            s3_client,
+            cache,
+            completion_cache,
+            commands: HashMap::new(),
+        }
+    }
+
     /// Register a command
     fn register_command(&mut self, command: Arc<dyn Command>) {
         self.commands.insert(command.name().to_string(), command);
+    }
+
+    /// Register a command (public for testing)
+    pub fn register_command_pub(&mut self, command: Arc<dyn Command>) {
+        self.register_command(command);
     }
 
     /// Execute a command line
@@ -91,7 +112,7 @@ impl ShellState {
             let cmd = Arc::clone(command);
             cmd.execute(self, args).await
         } else {
-            Err(anyhow!("Unknown command: {}", cmd_name))
+            Err(anyhow!("Unknown command: {cmd_name}"))
         }
     }
 
@@ -137,23 +158,21 @@ impl ShellState {
 
     /// Get the current virtual path
     pub fn current_path(&self) -> VirtualPath {
-        self.node_to_path(&self.current_node)
+        Self::node_to_path(&self.current_node)
     }
 
     /// Convert a VFS node to a virtual path
-    fn node_to_path(&self, node: &VfsNode) -> VirtualPath {
+    fn node_to_path(node: &VfsNode) -> VirtualPath {
         match node {
             VfsNode::Root => VirtualPath::parse("/"),
-            VfsNode::Bucket { name } => VirtualPath::parse(&format!("/{}", name)),
+            VfsNode::Bucket { name } => VirtualPath::parse(&format!("/{name}")),
             VfsNode::Prefix { bucket, prefix } => {
                 VirtualPath::parse(&format!("/{}/{}", bucket, prefix.trim_end_matches('/')))
             }
-            VfsNode::Object { bucket, key, .. } => {
-                VirtualPath::parse(&format!("/{}/{}", bucket, key))
-            }
-            VfsNode::Archive { parent, .. } => self.node_to_path(parent),
+            VfsNode::Object { bucket, key, .. } => VirtualPath::parse(&format!("/{bucket}/{key}")),
+            VfsNode::Archive { parent, .. } => Self::node_to_path(parent),
             VfsNode::ArchiveEntry { archive, path, .. } => {
-                let archive_path = self.node_to_path(archive);
+                let archive_path = Self::node_to_path(archive);
                 archive_path.join(path)
             }
         }

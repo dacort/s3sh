@@ -134,7 +134,7 @@ impl Read for SyncS3Reader {
                 let mut stream = self.stream.lock().await;
                 stream.read_internal(buf).await
             })
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(std::io::Error::other)
     }
 }
 

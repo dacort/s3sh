@@ -1,11 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use colored::*;
 
 use super::{Command, ShellState};
+use crate::archive::ArchiveHandler;
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
-use crate::archive::ArchiveHandler;
 use crate::vfs::{ArchiveType, VfsNode};
 use std::sync::Arc;
 
@@ -71,7 +71,7 @@ impl Command for LsCommand {
                 let buckets = state.s3_client().list_buckets().await?;
 
                 if long_format {
-                    println!("{:<30} {}", "NAME", "CREATED");
+                    println!("{:<30} CREATED", "NAME");
                     println!("{}", "-".repeat(60));
                     for bucket in buckets {
                         let created = bucket.creation_date.unwrap_or_else(|| "-".to_string());
@@ -89,16 +89,20 @@ impl Command for LsCommand {
                 let result = state.s3_client().list_objects(name, "", Some("/")).await?;
 
                 if long_format {
-                    println!("{:<50} {:>12} {}", "NAME", "SIZE", "MODIFIED");
+                    println!("{:<50} {:>12} MODIFIED", "NAME", "SIZE");
                     println!("{}", "-".repeat(80));
 
                     // Print prefixes (directories)
                     for prefix in &result.prefixes {
-                        let display_name = prefix.trim_end_matches('/').rsplit('/').next().unwrap_or(prefix);
+                        let display_name = prefix
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(prefix);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!("{:<50} {:>12} {}",
-                                format!("{}/", display_name).blue().bold(),
-                                "-",
+                            println!(
+                                "{:<50} {:>12} -",
+                                format!("{display_name}/").blue().bold(),
                                 "-"
                             );
                         }
@@ -109,7 +113,8 @@ impl Command for LsCommand {
                         let display_name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
                         if Self::should_display(display_name, &filter_pattern) {
                             let modified = obj.last_modified.as_deref().unwrap_or("-");
-                            println!("{:<50} {:>12} {}",
+                            println!(
+                                "{:<50} {:>12} {}",
                                 display_name,
                                 humansize::format_size(obj.size, humansize::BINARY),
                                 modified
@@ -119,7 +124,11 @@ impl Command for LsCommand {
                 } else {
                     // Print prefixes
                     for prefix in &result.prefixes {
-                        let display_name = prefix.trim_end_matches('/').rsplit('/').next().unwrap_or(prefix);
+                        let display_name = prefix
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(prefix);
                         if Self::should_display(display_name, &filter_pattern) {
                             println!("{}/", display_name.blue().bold());
                         }
@@ -129,7 +138,7 @@ impl Command for LsCommand {
                     for obj in &result.objects {
                         let display_name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!("{}", display_name);
+                            println!("{display_name}");
                         }
                     }
                 }
@@ -143,16 +152,16 @@ impl Command for LsCommand {
                     .await?;
 
                 if long_format {
-                    println!("{:<50} {:>12} {}", "NAME", "SIZE", "MODIFIED");
+                    println!("{:<50} {:>12} MODIFIED", "NAME", "SIZE");
                     println!("{}", "-".repeat(80));
 
                     // Print prefixes (directories)
                     for p in &result.prefixes {
                         let display_name = p.trim_end_matches('/').rsplit('/').next().unwrap_or(p);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!("{:<50} {:>12} {}",
-                                format!("{}/", display_name).blue().bold(),
-                                "-",
+                            println!(
+                                "{:<50} {:>12} -",
+                                format!("{display_name}/").blue().bold(),
                                 "-"
                             );
                         }
@@ -163,7 +172,8 @@ impl Command for LsCommand {
                         let display_name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
                         if Self::should_display(display_name, &filter_pattern) {
                             let modified = obj.last_modified.as_deref().unwrap_or("-");
-                            println!("{:<50} {:>12} {}",
+                            println!(
+                                "{:<50} {:>12} {}",
                                 display_name,
                                 humansize::format_size(obj.size, humansize::BINARY),
                                 modified
@@ -183,7 +193,7 @@ impl Command for LsCommand {
                     for obj in &result.objects {
                         let display_name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!("{}", display_name);
+                            println!("{display_name}");
                         }
                     }
                 }
@@ -204,7 +214,7 @@ impl Command for LsCommand {
                         _ => return Err(anyhow!("Invalid archive parent")),
                     };
 
-                    let cache_key = format!("s3://{}/{}", bucket, key);
+                    let cache_key = format!("s3://{bucket}/{key}");
                     if let Some(cached) = state.cache().get(&cache_key) {
                         cached
                     } else {
@@ -243,13 +253,18 @@ impl Command for LsCommand {
                     println!("{}", "-".repeat(65));
 
                     for entry in entries {
-                        let base_name = entry.path.trim_end_matches('/').rsplit('/').next().unwrap_or(&entry.path);
+                        let base_name = entry
+                            .path
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&entry.path);
                         if !Self::should_display(base_name, &filter_pattern) {
                             continue;
                         }
 
                         let display_name = if entry.is_dir {
-                            format!("{}/", base_name)
+                            format!("{base_name}/")
                         } else {
                             base_name.to_string()
                         };
@@ -263,18 +278,23 @@ impl Command for LsCommand {
                         if entry.is_dir {
                             println!("{:<50} {:>12}", display_name.blue().bold(), size_str);
                         } else {
-                            println!("{:<50} {:>12}", display_name, size_str);
+                            println!("{display_name:<50} {size_str:>12}");
                         }
                     }
                 } else {
                     for entry in entries {
-                        let base_name = entry.path.trim_end_matches('/').rsplit('/').next().unwrap_or(&entry.path);
+                        let base_name = entry
+                            .path
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&entry.path);
                         if !Self::should_display(base_name, &filter_pattern) {
                             continue;
                         }
 
                         let display_name = if entry.is_dir {
-                            format!("{}/", base_name)
+                            format!("{base_name}/")
                         } else {
                             base_name.to_string()
                         };
@@ -282,7 +302,7 @@ impl Command for LsCommand {
                         if entry.is_dir {
                             println!("{}", display_name.blue().bold());
                         } else {
-                            println!("{}", display_name);
+                            println!("{display_name}");
                         }
                     }
                 }
@@ -317,7 +337,7 @@ impl Command for LsCommand {
                             _ => return Err(anyhow!("Invalid archive parent")),
                         };
 
-                        let cache_key = format!("s3://{}/{}", bucket, key);
+                        let cache_key = format!("s3://{bucket}/{key}");
                         if let Some(cached) = state.cache().get(&cache_key) {
                             cached
                         } else {
@@ -359,13 +379,17 @@ impl Command for LsCommand {
 
                     for entry in entries {
                         let full_path = &entry.path;
-                        let base_name = full_path.trim_end_matches('/').rsplit('/').next().unwrap_or(full_path);
+                        let base_name = full_path
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(full_path);
                         if !Self::should_display(base_name, &filter_pattern) {
                             continue;
                         }
 
                         let display_name = if entry.is_dir {
-                            format!("{}/", base_name)
+                            format!("{base_name}/")
                         } else {
                             base_name.to_string()
                         };
@@ -379,19 +403,23 @@ impl Command for LsCommand {
                         if entry.is_dir {
                             println!("{:<50} {:>12}", display_name.blue().bold(), size_str);
                         } else {
-                            println!("{:<50} {:>12}", display_name, size_str);
+                            println!("{display_name:<50} {size_str:>12}");
                         }
                     }
                 } else {
                     for entry in entries {
                         let full_path = &entry.path;
-                        let base_name = full_path.trim_end_matches('/').rsplit('/').next().unwrap_or(full_path);
+                        let base_name = full_path
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(full_path);
                         if !Self::should_display(base_name, &filter_pattern) {
                             continue;
                         }
 
                         let display_name = if entry.is_dir {
-                            format!("{}/", base_name)
+                            format!("{base_name}/")
                         } else {
                             base_name.to_string()
                         };
@@ -399,7 +427,7 @@ impl Command for LsCommand {
                         if entry.is_dir {
                             println!("{}", display_name.blue().bold());
                         } else {
-                            println!("{}", display_name);
+                            println!("{display_name}");
                         }
                     }
                 }
@@ -455,14 +483,10 @@ impl LsCommand {
             VfsNode::Bucket { .. } => Ok(VfsNode::Root),
             VfsNode::Prefix { bucket, prefix } => {
                 if prefix.trim_end_matches('/').contains('/') {
-                    let parent_prefix = prefix
-                        .trim_end_matches('/')
-                        .rsplitn(2, '/')
-                        .nth(1)
-                        .unwrap();
+                    let parent_prefix = prefix.trim_end_matches('/').rsplit_once('/').unwrap().0;
                     Ok(VfsNode::Prefix {
                         bucket: bucket.clone(),
-                        prefix: format!("{}/", parent_prefix),
+                        prefix: format!("{parent_prefix}/"),
                     })
                 } else {
                     Ok(VfsNode::Bucket {
@@ -475,9 +499,9 @@ impl LsCommand {
                 if path.trim_end_matches('/').contains('/') {
                     let parent_path = path
                         .trim_end_matches('/')
-                        .rsplitn(2, '/')
-                        .nth(1)
+                        .rsplit_once('/')
                         .unwrap()
+                        .0
                         .to_string();
                     Ok(VfsNode::ArchiveEntry {
                         archive: archive.clone(),
@@ -491,10 +515,10 @@ impl LsCommand {
             }
             VfsNode::Object { bucket, key, .. } => {
                 if key.contains('/') {
-                    let parent_prefix = key.rsplitn(2, '/').nth(1).unwrap();
+                    let parent_prefix = key.rsplit_once('/').unwrap().0;
                     Ok(VfsNode::Prefix {
                         bucket: bucket.clone(),
-                        prefix: format!("{}/", parent_prefix),
+                        prefix: format!("{parent_prefix}/"),
                     })
                 } else {
                     Ok(VfsNode::Bucket {
@@ -526,11 +550,11 @@ impl LsCommand {
                 }
                 Ok(VfsNode::Prefix {
                     bucket: name.clone(),
-                    prefix: format!("{}/", segment),
+                    prefix: format!("{segment}/"),
                 })
             }
             VfsNode::Prefix { bucket, prefix } => {
-                let full_key = format!("{}{}", prefix, segment);
+                let full_key = format!("{prefix}{segment}");
                 if let Ok(metadata) = state.s3_client().head_object(bucket, &full_key).await {
                     return Ok(VfsNode::Object {
                         bucket: bucket.clone(),
@@ -540,47 +564,47 @@ impl LsCommand {
                 }
                 Ok(VfsNode::Prefix {
                     bucket: bucket.clone(),
-                    prefix: format!("{}/", full_key),
+                    prefix: format!("{full_key}/"),
                 })
             }
             VfsNode::Archive { index, .. } => {
-                if let Some(idx) = index {
-                    if let Some(entry) = idx.find_entry(segment) {
-                        if entry.is_dir {
-                            // Store the path without trailing slash for consistency
-                            let clean_path = entry.path.trim_end_matches('/').to_string();
-                            return Ok(VfsNode::ArchiveEntry {
-                                archive: Box::new(current.clone()),
-                                path: clean_path,
-                                size: entry.size,
-                                is_dir: true,
-                            });
-                        }
-                    }
+                if let Some(idx) = index
+                    && let Some(entry) = idx.find_entry(segment)
+                    && entry.is_dir
+                {
+                    // Store the path without trailing slash for consistency
+                    let clean_path = entry.path.trim_end_matches('/').to_string();
+                    return Ok(VfsNode::ArchiveEntry {
+                        archive: Box::new(current.clone()),
+                        path: clean_path,
+                        size: entry.size,
+                        is_dir: true,
+                    });
                 }
-                Err(anyhow!("Path not found in archive: {}", segment))
+                Err(anyhow!("Path not found in archive: {segment}"))
             }
             VfsNode::ArchiveEntry { archive, path, .. } => {
-                if let VfsNode::Archive { index, .. } = archive.as_ref() {
-                    if let Some(idx) = index {
-                        let target_path = if path.is_empty() {
-                            segment.to_string()
-                        } else {
-                            format!("{}/{}", path.trim_end_matches('/'), segment)
-                        };
+                if let VfsNode::Archive {
+                    index: Some(idx), ..
+                } = archive.as_ref()
+                {
+                    let target_path = if path.is_empty() {
+                        segment.to_string()
+                    } else {
+                        format!("{}/{}", path.trim_end_matches('/'), segment)
+                    };
 
-                        if let Some(entry) = idx.find_entry(&target_path) {
-                            if entry.is_dir {
-                                // Store the path without trailing slash for consistency
-                                let clean_path = entry.path.trim_end_matches('/').to_string();
-                                return Ok(VfsNode::ArchiveEntry {
-                                    archive: archive.clone(),
-                                    path: clean_path,
-                                    size: entry.size,
-                                    is_dir: true,
-                                });
-                            }
-                        }
+                    if let Some(entry) = idx.find_entry(&target_path)
+                        && entry.is_dir
+                    {
+                        // Store the path without trailing slash for consistency
+                        let clean_path = entry.path.trim_end_matches('/').to_string();
+                        return Ok(VfsNode::ArchiveEntry {
+                            archive: archive.clone(),
+                            path: clean_path,
+                            size: entry.size,
+                            is_dir: true,
+                        });
                     }
                 }
                 Err(anyhow!("Path not found"))

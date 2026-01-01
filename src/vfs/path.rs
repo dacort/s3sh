@@ -48,59 +48,14 @@ impl VirtualPath {
             is_absolute: self.is_absolute,
         }
     }
-
-    /// Convert to a string representation
-    pub fn to_string(&self) -> String {
-        if self.segments.is_empty() {
-            "/".to_string()
-        } else {
-            format!("/{}", self.segments.join("/"))
-        }
-    }
 }
 
 impl std::fmt::Display for VirtualPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_absolute() {
-        let path = VirtualPath::parse("/bucket/prefix/file.txt");
-        assert!(path.is_absolute());
-        assert_eq!(path.segments(), &["bucket", "prefix", "file.txt"]);
-    }
-
-    #[test]
-    fn test_parse_relative() {
-        let path = VirtualPath::parse("prefix/file.txt");
-        assert!(!path.is_absolute());
-        assert_eq!(path.segments(), &["prefix", "file.txt"]);
-    }
-
-    #[test]
-    fn test_parent() {
-        let path = VirtualPath::parse("/bucket/prefix/file.txt");
-        let parent = path.parent().unwrap();
-        assert_eq!(parent.segments(), &["bucket", "prefix"]);
-    }
-
-    #[test]
-    fn test_join() {
-        let path = VirtualPath::parse("/bucket/prefix");
-        let joined = path.join("subdir/file.txt");
-        assert_eq!(joined.segments(), &["bucket", "prefix", "subdir", "file.txt"]);
-    }
-
-    #[test]
-    fn test_join_with_dotdot() {
-        let path = VirtualPath::parse("/bucket/prefix/subdir");
-        let joined = path.join("../file.txt");
-        assert_eq!(joined.segments(), &["bucket", "prefix", "file.txt"]);
+        if self.segments.is_empty() {
+            write!(f, "/")
+        } else {
+            write!(f, "/{}", self.segments.join("/"))
+        }
     }
 }

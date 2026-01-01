@@ -1,5 +1,5 @@
-use rustyline::completion::{Completer, Pair};
 use rustyline::Context;
+use rustyline::completion::{Completer, Pair};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -133,7 +133,8 @@ impl ShellCompleter {
             match self.fetch_entries_for_path(dir_path) {
                 Ok(entries) => {
                     // Cache for future use
-                    self.cache.update_entries(cache_key.clone(), entries.clone());
+                    self.cache
+                        .update_entries(cache_key.clone(), entries.clone());
                     entries
                 }
                 Err(_) => return Vec::new(),
@@ -196,7 +197,7 @@ impl ShellCompleter {
     fn node_to_cache_key(&self, node: &VfsNode) -> String {
         match node {
             VfsNode::Root => "/".to_string(),
-            VfsNode::Bucket { name } => format!("/{}", name),
+            VfsNode::Bucket { name } => format!("/{name}"),
             VfsNode::Prefix { bucket, prefix } => {
                 format!("/{}/{}", bucket, prefix.trim_end_matches('/'))
             }
@@ -222,10 +223,12 @@ impl ShellCompleter {
         }
 
         // Add any remaining path after ../
-        if let Some(suffix) = rel_path.strip_prefix("../").or_else(|| rel_path.strip_prefix("..")) {
-            if !suffix.is_empty() {
-                key = format!("{}/{}", key.trim_end_matches('/'), suffix);
-            }
+        if let Some(suffix) = rel_path
+            .strip_prefix("../")
+            .or_else(|| rel_path.strip_prefix(".."))
+            && !suffix.is_empty()
+        {
+            key = format!("{}/{}", key.trim_end_matches('/'), suffix);
         }
 
         key
@@ -245,7 +248,8 @@ impl ShellCompleter {
         let current_clone = current.clone();
 
         handle.spawn(async move {
-            let result = Self::fetch_entries_async_static(&s3_client, &current_clone, &rel_path).await;
+            let result =
+                Self::fetch_entries_async_static(&s3_client, &current_clone, &rel_path).await;
             let _ = tx.send(result);
         });
 
@@ -276,12 +280,19 @@ impl ShellCompleter {
             }
             VfsNode::Bucket { ref name } => {
                 // List in bucket root
-                let result = s3_client.list_objects(name, "", Some("/")).await.map_err(|_| ())?;
+                let result = s3_client
+                    .list_objects(name, "", Some("/"))
+                    .await
+                    .map_err(|_| ())?;
                 let mut entries = Vec::new();
 
                 // Prefixes are directories
                 for prefix in result.prefixes {
-                    let name = prefix.trim_end_matches('/').rsplit('/').next().unwrap_or(&prefix);
+                    let name = prefix
+                        .trim_end_matches('/')
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&prefix);
                     entries.push(CompletionEntry {
                         name: name.to_string(),
                         is_dir: true,
@@ -298,9 +309,15 @@ impl ShellCompleter {
 
                 Ok(entries)
             }
-            VfsNode::Prefix { ref bucket, ref prefix } => {
+            VfsNode::Prefix {
+                ref bucket,
+                ref prefix,
+            } => {
                 // List at this prefix
-                let result = s3_client.list_objects(bucket, prefix, Some("/")).await.map_err(|_| ())?;
+                let result = s3_client
+                    .list_objects(bucket, prefix, Some("/"))
+                    .await
+                    .map_err(|_| ())?;
                 let mut entries = Vec::new();
 
                 // Prefixes are directories
@@ -335,7 +352,10 @@ impl ShellCompleter {
         // Handle parent navigation
         if rel_path.starts_with("..") {
             let parent = Self::navigate_up_static(current);
-            let remaining = rel_path.strip_prefix("../").or_else(|| rel_path.strip_prefix("..")).unwrap_or("");
+            let remaining = rel_path
+                .strip_prefix("../")
+                .or_else(|| rel_path.strip_prefix(".."))
+                .unwrap_or("");
             if remaining.is_empty() {
                 return parent;
             }
@@ -354,13 +374,15 @@ impl ShellCompleter {
             VfsNode::Bucket { .. } => VfsNode::Root,
             VfsNode::Prefix { bucket, prefix } => {
                 if prefix.trim_end_matches('/').contains('/') {
-                    let parent_prefix = prefix.trim_end_matches('/').rsplitn(2, '/').nth(1).unwrap();
+                    let parent_prefix = prefix.trim_end_matches('/').rsplit_once('/').unwrap().0;
                     VfsNode::Prefix {
                         bucket: bucket.clone(),
-                        prefix: format!("{}/", parent_prefix),
+                        prefix: format!("{parent_prefix}/"),
                     }
                 } else {
-                    VfsNode::Bucket { name: bucket.clone() }
+                    VfsNode::Bucket {
+                        name: bucket.clone(),
+                    }
                 }
             }
             _ => current.clone(),
@@ -370,14 +392,16 @@ impl ShellCompleter {
     /// Resolve child node (static version)
     fn resolve_child_node_static(current: &VfsNode, name: &str) -> VfsNode {
         match current {
-            VfsNode::Root => VfsNode::Bucket { name: name.to_string() },
+            VfsNode::Root => VfsNode::Bucket {
+                name: name.to_string(),
+            },
             VfsNode::Bucket { name: bucket } => VfsNode::Prefix {
                 bucket: bucket.clone(),
-                prefix: format!("{}/", name),
+                prefix: format!("{name}/"),
             },
             VfsNode::Prefix { bucket, prefix } => VfsNode::Prefix {
                 bucket: bucket.clone(),
-                prefix: format!("{}{}/", prefix, name),
+                prefix: format!("{prefix}{name}/"),
             },
             _ => current.clone(),
         }
