@@ -48,19 +48,14 @@ impl VirtualPath {
             is_absolute: self.is_absolute,
         }
     }
-
-    /// Convert to a string representation
-    pub fn to_string(&self) -> String {
-        if self.segments.is_empty() {
-            "/".to_string()
-        } else {
-            format!("/{}", self.segments.join("/"))
-        }
-    }
 }
 
 impl std::fmt::Display for VirtualPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+        if self.segments.is_empty() {
+            write!(f, "/")
+        } else {
+            write!(f, "/{}", self.segments.join("/"))
+        }
     }
 }

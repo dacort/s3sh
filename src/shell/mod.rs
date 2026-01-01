@@ -158,11 +158,11 @@ impl ShellState {
 
     /// Get the current virtual path
     pub fn current_path(&self) -> VirtualPath {
-        self.node_to_path(&self.current_node)
+        Self::node_to_path(&self.current_node)
     }
 
     /// Convert a VFS node to a virtual path
-    fn node_to_path(&self, node: &VfsNode) -> VirtualPath {
+    fn node_to_path(node: &VfsNode) -> VirtualPath {
         match node {
             VfsNode::Root => VirtualPath::parse("/"),
             VfsNode::Bucket { name } => VirtualPath::parse(&format!("/{name}")),
@@ -172,9 +172,9 @@ impl ShellState {
             VfsNode::Object { bucket, key, .. } => {
                 VirtualPath::parse(&format!("/{bucket}/{key}"))
             }
-            VfsNode::Archive { parent, .. } => self.node_to_path(parent),
+            VfsNode::Archive { parent, .. } => Self::node_to_path(parent),
             VfsNode::ArchiveEntry { archive, path, .. } => {
-                let archive_path = self.node_to_path(archive);
+                let archive_path = Self::node_to_path(archive);
                 archive_path.join(path)
             }
         }

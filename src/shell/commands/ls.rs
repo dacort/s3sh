@@ -583,25 +583,23 @@ impl LsCommand {
                 Err(anyhow!("Path not found in archive: {segment}"))
             }
             VfsNode::ArchiveEntry { archive, path, .. } => {
-                if let VfsNode::Archive { index, .. } = archive.as_ref() {
-                    if let Some(idx) = index {
-                        let target_path = if path.is_empty() {
-                            segment.to_string()
-                        } else {
-                            format!("{}/{}", path.trim_end_matches('/'), segment)
-                        };
+                if let VfsNode::Archive { index: Some(idx), .. } = archive.as_ref() {
+                    let target_path = if path.is_empty() {
+                        segment.to_string()
+                    } else {
+                        format!("{}/{}", path.trim_end_matches('/'), segment)
+                    };
 
-                        if let Some(entry) = idx.find_entry(&target_path) {
-                            if entry.is_dir {
-                                // Store the path without trailing slash for consistency
-                                let clean_path = entry.path.trim_end_matches('/').to_string();
-                                return Ok(VfsNode::ArchiveEntry {
-                                    archive: archive.clone(),
-                                    path: clean_path,
-                                    size: entry.size,
-                                    is_dir: true,
-                                });
-                            }
+                    if let Some(entry) = idx.find_entry(&target_path) {
+                        if entry.is_dir {
+                            // Store the path without trailing slash for consistency
+                            let clean_path = entry.path.trim_end_matches('/').to_string();
+                            return Ok(VfsNode::ArchiveEntry {
+                                archive: archive.clone(),
+                                path: clean_path,
+                                size: entry.size,
+                                is_dir: true,
+                            });
                         }
                     }
                 }
