@@ -58,11 +58,8 @@ impl ShellState {
             return Ok(());
         }
 
-        // Simple parsing - split on whitespace
-        let parts: Vec<String> = line
-            .split_whitespace()
-            .map(String::from)
-            .collect();
+        // Parse command line respecting quotes
+        let parts = Self::parse_command_line(line)?;
 
         if parts.is_empty() {
             return Ok(());
@@ -159,5 +156,58 @@ impl ShellState {
     /// Get the prompt string
     pub fn prompt(&self) -> String {
         format!("3xplore:{} $ ", self.current_path())
+    }
+
+    /// Parse command line respecting quotes (both single and double)
+    fn parse_command_line(line: &str) -> Result<Vec<String>> {
+        let mut args = Vec::new();
+        let mut current_arg = String::new();
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        let mut escape_next = false;
+
+        for ch in line.chars() {
+            if escape_next {
+                current_arg.push(ch);
+                escape_next = false;
+                continue;
+            }
+
+            match ch {
+                '\\' if !in_single_quote => {
+                    escape_next = true;
+                }
+                '\'' if !in_double_quote => {
+                    in_single_quote = !in_single_quote;
+                }
+                '"' if !in_single_quote => {
+                    in_double_quote = !in_double_quote;
+                }
+                ' ' | '\t' if !in_single_quote && !in_double_quote => {
+                    if !current_arg.is_empty() {
+                        args.push(current_arg.clone());
+                        current_arg.clear();
+                    }
+                }
+                _ => {
+                    current_arg.push(ch);
+                }
+            }
+        }
+
+        // Push the last argument
+        if !current_arg.is_empty() {
+            args.push(current_arg);
+        }
+
+        // Check for unclosed quotes
+        if in_single_quote {
+            return Err(anyhow!("Unclosed single quote"));
+        }
+        if in_double_quote {
+            return Err(anyhow!("Unclosed double quote"));
+        }
+
+        Ok(args)
     }
 }

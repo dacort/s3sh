@@ -28,27 +28,44 @@ impl Command for CdCommand {
 
         let path_str = &args[0];
 
-        // Parse the path
-        let target_node = if path_str == "/" {
-            // Go to root
+        // Handle absolute vs relative paths
+        let mut current = if path_str.starts_with('/') {
+            // Start from root for absolute paths
             VfsNode::Root
-        } else if path_str == ".." {
-            // Go up one level
-            self.navigate_up(state.current_node())?
-        } else if path_str.starts_with('/') {
-            // Absolute path
-            self.resolve_absolute_path(state, path_str).await?
         } else {
-            // Relative path
-            self.resolve_relative_path(state, path_str).await?
+            // Start from current location for relative paths
+            state.current_node().clone()
         };
 
+        // Split path into segments and process each one
+        let segments: Vec<&str> = path_str
+            .trim_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty() && *s != ".")
+            .collect();
+
+        // Process each segment
+        for segment in segments {
+            current = if segment == ".." {
+                // Go up one level
+                self.navigate_up(&current)?
+            } else {
+                // Navigate to this segment
+                self.navigate_to_segment(state, &current, segment).await?
+            };
+        }
+
+        // Handle the special case of just "/"
+        if path_str == "/" {
+            current = VfsNode::Root;
+        }
+
         // Verify the target is navigable
-        if !target_node.is_navigable() {
+        if !current.is_navigable() {
             return Err(anyhow!("Not a directory: {}", path_str));
         }
 
-        state.set_current_node(target_node);
+        state.set_current_node(current);
         Ok(())
     }
 }
@@ -118,6 +135,112 @@ impl CdCommand {
                     Ok(*archive.clone())
                 }
             }
+        }
+    }
+
+    /// Navigate from current node to a named segment
+    async fn navigate_to_segment(
+        &self,
+        state: &ShellState,
+        current: &VfsNode,
+        segment: &str,
+    ) -> Result<VfsNode> {
+        match current {
+            VfsNode::Root => {
+                // Segment is a bucket name
+                Ok(VfsNode::Bucket {
+                    name: segment.to_string(),
+                })
+            }
+
+            VfsNode::Bucket { name } => {
+                // Navigate within bucket
+                // Try as object first
+                if let Ok(metadata) = state.s3_client().head_object(name, segment).await {
+                    let obj_node = VfsNode::Object {
+                        bucket: name.clone(),
+                        key: segment.to_string(),
+                        size: metadata.size,
+                    };
+                    return self.try_archive_node(state, obj_node).await;
+                }
+
+                // Try as prefix
+                let prefix_key = format!("{}/", segment);
+                Ok(VfsNode::Prefix {
+                    bucket: name.clone(),
+                    prefix: prefix_key,
+                })
+            }
+
+            VfsNode::Prefix { bucket, prefix } => {
+                // Navigate within prefix
+                let full_key = format!("{}{}", prefix, segment);
+
+                // Try as object first
+                if let Ok(metadata) = state.s3_client().head_object(bucket, &full_key).await {
+                    let obj_node = VfsNode::Object {
+                        bucket: bucket.clone(),
+                        key: full_key.clone(),
+                        size: metadata.size,
+                    };
+                    return self.try_archive_node(state, obj_node).await;
+                }
+
+                // Try as prefix
+                let prefix_key = format!("{}/", full_key);
+                Ok(VfsNode::Prefix {
+                    bucket: bucket.clone(),
+                    prefix: prefix_key,
+                })
+            }
+
+            VfsNode::Archive { .. } => {
+                // Navigate within archive
+                let index = self.get_or_build_archive_index(state, current).await?;
+
+                // Check if segment exists in the archive
+                if let Some(entry) = index.entries.get(segment) {
+                    if entry.is_dir {
+                        return Ok(VfsNode::ArchiveEntry {
+                            archive: Box::new(current.clone()),
+                            path: segment.to_string(),
+                            size: entry.size,
+                            is_dir: true,
+                        });
+                    }
+                }
+
+                Err(anyhow!("Path not found in archive: {}", segment))
+            }
+
+            VfsNode::ArchiveEntry { archive, path: current_path, .. } => {
+                // Navigate within archive
+                let index = self.get_or_build_archive_index(state, archive).await?;
+
+                // Build target path
+                let target_path = if current_path.is_empty() {
+                    segment.to_string()
+                } else {
+                    format!("{}/{}", current_path.trim_end_matches('/'), segment)
+                };
+
+                // Check if this path exists in the archive
+                if let Some(entry) = index.entries.get(&target_path) {
+                    if entry.is_dir {
+                        return Ok(VfsNode::ArchiveEntry {
+                            archive: archive.clone(),
+                            path: target_path,
+                            size: entry.size,
+                            is_dir: true,
+                        });
+                    }
+                }
+
+                Err(anyhow!("Path not found in archive: {}", target_path))
+            }
+
+            VfsNode::Object { .. } => Err(anyhow!("Cannot cd from a file")),
         }
     }
 

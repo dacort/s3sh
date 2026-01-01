@@ -2,24 +2,111 @@ use anyhow::{Context, Result};
 use aws_sdk_s3::Client;
 use aws_sdk_s3::types::Object;
 use bytes::Bytes;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
-/// Wrapper around AWS S3 client
+/// Wrapper around AWS S3 client with cross-region support
 pub struct S3Client {
-    client: Client,
+    default_client: Client,
+    default_region: String,
+    /// Cache of region-specific clients
+    regional_clients: Arc<RwLock<HashMap<String, Client>>>,
 }
 
 impl S3Client {
     /// Create a new S3 client using default AWS configuration
     pub async fn new() -> Result<Self> {
         let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+        let default_region = config.region()
+            .map(|r| r.as_ref().to_string())
+            .unwrap_or_else(|| "us-west-2".to_string());
         let client = Client::new(&config);
-        Ok(S3Client { client })
+
+        Ok(S3Client {
+            default_client: client,
+            default_region,
+            regional_clients: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+
+    /// Get or create a client for a specific region
+    async fn get_regional_client(&self, region: &str) -> Result<Client> {
+        // Check if we already have a client for this region
+        {
+            let clients = self.regional_clients.read().unwrap();
+            if let Some(client) = clients.get(region) {
+                return Ok(client.clone());
+            }
+        }
+
+        // Create a new client for this region
+        let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest())
+            .await;
+        let region_provider = aws_sdk_s3::config::Region::new(region.to_string());
+        let s3_config = aws_sdk_s3::config::Builder::from(&config)
+            .region(region_provider)
+            .build();
+        let client = Client::from_conf(s3_config);
+
+        // Cache it
+        {
+            let mut clients = self.regional_clients.write().unwrap();
+            clients.insert(region.to_string(), client.clone());
+        }
+
+        Ok(client)
+    }
+
+    /// Get the region of a bucket by making a head_bucket request
+    async fn get_bucket_region(&self, bucket: &str) -> Result<String> {
+        // Try with default client first
+        match self.default_client.head_bucket().bucket(bucket).send().await {
+            Ok(resp) => {
+                // Extract region from response headers
+                if let Some(region) = resp.bucket_region() {
+                    return Ok(region.to_string());
+                }
+                Ok(self.default_region.clone())
+            }
+            Err(e) => {
+                // Check if error contains region information
+                let error_msg = format!("{:?}", e);
+                if error_msg.contains("PermanentRedirect") || error_msg.contains("301") {
+                    // Try to extract region from error
+                    // AWS returns the region in the error for redirects
+                    // For now, we'll try common regions
+                    for region in ["us-east-1", "us-west-1", "us-west-2", "eu-west-1", "ap-southeast-1"] {
+                        let client = self.get_regional_client(region).await?;
+                        if let Ok(resp) = client.head_bucket().bucket(bucket).send().await {
+                            if let Some(bucket_region) = resp.bucket_region() {
+                                return Ok(bucket_region.to_string());
+                            }
+                            return Ok(region.to_string());
+                        }
+                    }
+                }
+                Err(anyhow::anyhow!("Failed to determine bucket region: {}", bucket))
+            }
+        }
+    }
+
+    /// Get the appropriate client for a bucket (handles cross-region)
+    async fn get_client_for_bucket(&self, bucket: &str) -> Result<Client> {
+        // Try default client first
+        match self.default_client.head_bucket().bucket(bucket).send().await {
+            Ok(_) => Ok(self.default_client.clone()),
+            Err(_) => {
+                // Get the bucket's region and return appropriate client
+                let region = self.get_bucket_region(bucket).await?;
+                self.get_regional_client(&region).await
+            }
+        }
     }
 
     /// List all S3 buckets
     pub async fn list_buckets(&self) -> Result<Vec<BucketInfo>> {
         let resp = self
-            .client
+            .default_client
             .list_buckets()
             .send()
             .await
@@ -46,7 +133,8 @@ impl S3Client {
         prefix: &str,
         delimiter: Option<&str>,
     ) -> Result<ListObjectsResult> {
-        let mut req = self.client.list_objects_v2().bucket(bucket);
+        let client = self.get_client_for_bucket(bucket).await?;
+        let mut req = client.list_objects_v2().bucket(bucket);
 
         if !prefix.is_empty() {
             req = req.prefix(prefix);
@@ -85,8 +173,8 @@ impl S3Client {
 
     /// Get an object's metadata
     pub async fn head_object(&self, bucket: &str, key: &str) -> Result<ObjectMetadata> {
-        let resp = self
-            .client
+        let client = self.get_client_for_bucket(bucket).await?;
+        let resp = client
             .head_object()
             .bucket(bucket)
             .key(key)
@@ -105,8 +193,8 @@ impl S3Client {
 
     /// Get an entire object's contents
     pub async fn get_object(&self, bucket: &str, key: &str) -> Result<Bytes> {
-        let resp = self
-            .client
+        let client = self.get_client_for_bucket(bucket).await?;
+        let resp = client
             .get_object()
             .bucket(bucket)
             .key(key)
