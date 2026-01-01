@@ -145,10 +145,9 @@ impl S3Client {
             .iter()
             .map(|b| BucketInfo {
                 name: b.name().unwrap_or("").to_string(),
-                creation_date: b.creation_date().and_then(|d| {
-                    d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime)
-                            .ok()
-                }),
+                creation_date: b
+                    .creation_date()
+                    .and_then(|d| d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime).ok()),
             })
             .collect();
 
@@ -191,10 +190,9 @@ impl S3Client {
             .map(|obj| ObjectInfo {
                 key: obj.key().unwrap_or("").to_string(),
                 size: obj.size().unwrap_or(0) as u64,
-                last_modified: obj.last_modified().and_then(|d| {
-                    d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime)
-                            .ok()
-                }),
+                last_modified: obj
+                    .last_modified()
+                    .and_then(|d| d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime).ok()),
             })
             .collect();
 
@@ -210,9 +208,7 @@ impl S3Client {
             .key(key)
             .send()
             .await
-            .context(format!(
-                "Failed to get metadata for s3://{bucket}/{key}"
-            ))?;
+            .context(format!("Failed to get metadata for s3://{bucket}/{key}"))?;
 
         Ok(ObjectMetadata {
             size: resp.content_length().unwrap_or(0) as u64,
@@ -258,9 +254,7 @@ impl S3Client {
             .range(range)
             .send()
             .await
-            .context(format!(
-                "Failed to get object range s3://{bucket}/{key}"
-            ))?;
+            .context(format!("Failed to get object range s3://{bucket}/{key}"))?;
 
         let bytes = resp
             .body

@@ -87,8 +87,7 @@ impl CdCommand {
             VfsNode::Prefix { bucket, prefix } => {
                 // Remove the last segment
                 if prefix.trim_end_matches('/').contains('/') {
-                    let parent_prefix =
-                        prefix.trim_end_matches('/').rsplit_once('/').unwrap().0;
+                    let parent_prefix = prefix.trim_end_matches('/').rsplit_once('/').unwrap().0;
                     Ok(VfsNode::Prefix {
                         bucket: bucket.clone(),
                         prefix: format!("{parent_prefix}/"),
@@ -122,7 +121,10 @@ impl CdCommand {
                 // Go up within the archive
                 if path.trim_end_matches('/').contains('/') {
                     let parent_path = path
-                        .trim_end_matches('/').rsplit_once('/').unwrap().0
+                        .trim_end_matches('/')
+                        .rsplit_once('/')
+                        .unwrap()
+                        .0
                         .to_string();
 
                     Ok(VfsNode::ArchiveEntry {

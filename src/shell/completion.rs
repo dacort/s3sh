@@ -375,8 +375,7 @@ impl ShellCompleter {
             VfsNode::Bucket { .. } => VfsNode::Root,
             VfsNode::Prefix { bucket, prefix } => {
                 if prefix.trim_end_matches('/').contains('/') {
-                    let parent_prefix =
-                        prefix.trim_end_matches('/').rsplit_once('/').unwrap().0;
+                    let parent_prefix = prefix.trim_end_matches('/').rsplit_once('/').unwrap().0;
                     VfsNode::Prefix {
                         bucket: bucket.clone(),
                         prefix: format!("{parent_prefix}/"),

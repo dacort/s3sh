@@ -169,9 +169,7 @@ impl ShellState {
             VfsNode::Prefix { bucket, prefix } => {
                 VirtualPath::parse(&format!("/{}/{}", bucket, prefix.trim_end_matches('/')))
             }
-            VfsNode::Object { bucket, key, .. } => {
-                VirtualPath::parse(&format!("/{bucket}/{key}"))
-            }
+            VfsNode::Object { bucket, key, .. } => VirtualPath::parse(&format!("/{bucket}/{key}")),
             VfsNode::Archive { parent, .. } => Self::node_to_path(parent),
             VfsNode::ArchiveEntry { archive, path, .. } => {
                 let archive_path = Self::node_to_path(archive);

@@ -97,8 +97,7 @@ impl Command for CatCommand {
                     } else {
                         // Show spinner while building index
                         let filename = key.split('/').next_back().unwrap_or(key);
-                        let spinner =
-                            create_spinner(&format!("Building index for {filename}..."));
+                        let spinner = create_spinner(&format!("Building index for {filename}..."));
 
                         let built = match archive_type {
                             ArchiveType::Zip => {

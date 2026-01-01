@@ -483,8 +483,7 @@ impl LsCommand {
             VfsNode::Bucket { .. } => Ok(VfsNode::Root),
             VfsNode::Prefix { bucket, prefix } => {
                 if prefix.trim_end_matches('/').contains('/') {
-                    let parent_prefix =
-                        prefix.trim_end_matches('/').rsplit_once('/').unwrap().0;
+                    let parent_prefix = prefix.trim_end_matches('/').rsplit_once('/').unwrap().0;
                     Ok(VfsNode::Prefix {
                         bucket: bucket.clone(),
                         prefix: format!("{parent_prefix}/"),
@@ -499,7 +498,10 @@ impl LsCommand {
             VfsNode::ArchiveEntry { archive, path, .. } => {
                 if path.trim_end_matches('/').contains('/') {
                     let parent_path = path
-                        .trim_end_matches('/').rsplit_once('/').unwrap().0
+                        .trim_end_matches('/')
+                        .rsplit_once('/')
+                        .unwrap()
+                        .0
                         .to_string();
                     Ok(VfsNode::ArchiveEntry {
                         archive: archive.clone(),
@@ -583,7 +585,10 @@ impl LsCommand {
                 Err(anyhow!("Path not found in archive: {segment}"))
             }
             VfsNode::ArchiveEntry { archive, path, .. } => {
-                if let VfsNode::Archive { index: Some(idx), .. } = archive.as_ref() {
+                if let VfsNode::Archive {
+                    index: Some(idx), ..
+                } = archive.as_ref()
+                {
                     let target_path = if path.is_empty() {
                         segment.to_string()
                     } else {
