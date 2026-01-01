@@ -1,8 +1,11 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use super::{Command, ShellState};
-use crate::vfs::{VfsNode, VirtualPath};
+use crate::archive::zip::ZipHandler;
+use crate::archive::ArchiveHandler;
+use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
 
 pub struct CdCommand;
 
@@ -97,10 +100,20 @@ impl CdCommand {
 
             VfsNode::ArchiveEntry { archive, path, .. } => {
                 // Go up within the archive
-                if path.contains('/') {
-                    let parent_path = path.rsplitn(2, '/').nth(1).unwrap();
-                    // TODO: Create proper ArchiveEntry node for parent
-                    Ok(*archive.clone())
+                if path.trim_end_matches('/').contains('/') {
+                    let parent_path = path
+                        .trim_end_matches('/')
+                        .rsplitn(2, '/')
+                        .nth(1)
+                        .unwrap()
+                        .to_string();
+
+                    Ok(VfsNode::ArchiveEntry {
+                        archive: archive.clone(),
+                        path: parent_path,
+                        size: 0,
+                        is_dir: true,
+                    })
                 } else {
                     Ok(*archive.clone())
                 }
@@ -132,12 +145,13 @@ impl CdCommand {
 
         // Try to get object metadata
         if let Ok(metadata) = state.s3_client().head_object(bucket, &key).await {
-            // It's an object
-            return Ok(VfsNode::Object {
+            // It's an object - check if it's an archive
+            let obj_node = VfsNode::Object {
                 bucket: bucket.clone(),
                 key: key.clone(),
                 size: metadata.size,
-            });
+            };
+            return self.try_archive_node(state, obj_node).await;
         }
 
         // Try as a prefix
@@ -181,11 +195,12 @@ impl CdCommand {
 
                 // Try as object first
                 if let Ok(metadata) = state.s3_client().head_object(name, &key).await {
-                    return Ok(VfsNode::Object {
+                    let obj_node = VfsNode::Object {
                         bucket: name.clone(),
                         key: key.clone(),
                         size: metadata.size,
-                    });
+                    };
+                    return self.try_archive_node(state, obj_node).await;
                 }
 
                 // Try as prefix
@@ -207,11 +222,12 @@ impl CdCommand {
 
                 // Try as object first
                 if let Ok(metadata) = state.s3_client().head_object(bucket, &full_key).await {
-                    return Ok(VfsNode::Object {
+                    let obj_node = VfsNode::Object {
                         bucket: bucket.clone(),
                         key: full_key.clone(),
                         size: metadata.size,
-                    });
+                    };
+                    return self.try_archive_node(state, obj_node).await;
                 }
 
                 // Try as prefix
@@ -230,14 +246,136 @@ impl CdCommand {
             VfsNode::Object { .. } => Err(anyhow!("Cannot cd from a file")),
 
             VfsNode::Archive { .. } => {
-                // Will implement in Phase 2
-                Err(anyhow!("cd within archives not yet implemented"))
+                // Navigate within archive
+                let index = self.get_or_build_archive_index(state, current).await?;
+
+                // Check if path exists in the archive
+                let normalized_path = path.trim_start_matches('/');
+
+                if let Some(entry) = index.entries.get(normalized_path) {
+                    if entry.is_dir {
+                        return Ok(VfsNode::ArchiveEntry {
+                            archive: Box::new(current.clone()),
+                            path: normalized_path.to_string(),
+                            size: entry.size,
+                            is_dir: true,
+                        });
+                    }
+                }
+
+                Err(anyhow!("Path not found in archive: {}", path))
             }
 
-            VfsNode::ArchiveEntry { .. } => {
-                // Will implement in Phase 2
-                Err(anyhow!("cd within archives not yet implemented"))
+            VfsNode::ArchiveEntry { archive, path: current_path, .. } => {
+                // Navigate within archive
+                let index = self.get_or_build_archive_index(state, archive).await?;
+
+                // Check if path points to a subdirectory in the archive
+                let target_path = if current_path.is_empty() {
+                    path.to_string()
+                } else {
+                    format!("{}/{}", current_path.trim_end_matches('/'), path)
+                };
+
+                // Check if this path exists in the archive
+                if let Some(entry) = index.entries.get(&target_path) {
+                    if entry.is_dir {
+                        return Ok(VfsNode::ArchiveEntry {
+                            archive: archive.clone(),
+                            path: target_path,
+                            size: entry.size,
+                            is_dir: true,
+                        });
+                    }
+                }
+
+                Err(anyhow!("Path not found in archive: {}", target_path))
             }
+        }
+    }
+
+    /// Check if a node is an archive and convert it to an Archive node
+    async fn try_archive_node(&self, state: &ShellState, node: VfsNode) -> Result<VfsNode> {
+        match &node {
+            VfsNode::Object { bucket, key, size } => {
+                // Check if this is an archive by extension
+                if let Some(archive_type) = ArchiveType::from_path(key) {
+                    // For now, only handle Zip
+                    if matches!(archive_type, ArchiveType::Zip) {
+                        // Build the archive index
+                        let handler = ZipHandler::new();
+                        let index = handler
+                            .build_index(state.s3_client(), bucket, key)
+                            .await?;
+
+                        // Store in cache
+                        let cache_key = format!("s3://{}/{}", bucket, key);
+                        state.cache().put(cache_key, Arc::new(index.clone()));
+
+                        return Ok(VfsNode::Archive {
+                            parent: Box::new(VfsNode::Object {
+                                bucket: bucket.clone(),
+                                key: key.clone(),
+                                size: *size,
+                            }),
+                            archive_type,
+                            index: Some(Arc::new(index)),
+                        });
+                    } else {
+                        return Err(anyhow!(
+                            "Archive type not yet supported: {:?}",
+                            archive_type
+                        ));
+                    }
+                }
+                Ok(node)
+            }
+            _ => Ok(node),
+        }
+    }
+
+    /// Get or build archive index
+    async fn get_or_build_archive_index(
+        &self,
+        state: &ShellState,
+        archive_node: &VfsNode,
+    ) -> Result<Arc<crate::vfs::ArchiveIndex>> {
+        match archive_node {
+            VfsNode::Archive {
+                parent,
+                archive_type,
+                index,
+            } => {
+                // Check if we already have the index
+                if let Some(idx) = index {
+                    return Ok(Arc::clone(idx));
+                }
+
+                // Get bucket and key from parent
+                let (bucket, key) = match parent.as_ref() {
+                    VfsNode::Object { bucket, key, .. } => (bucket, key),
+                    _ => return Err(anyhow!("Invalid archive parent node")),
+                };
+
+                // Check cache
+                let cache_key = format!("s3://{}/{}", bucket, key);
+                if let Some(cached) = state.cache().get(&cache_key) {
+                    return Ok(cached);
+                }
+
+                // Build the index
+                match archive_type {
+                    ArchiveType::Zip => {
+                        let handler = ZipHandler::new();
+                        let idx = handler.build_index(state.s3_client(), bucket, key).await?;
+                        let arc_idx = Arc::new(idx);
+                        state.cache().put(cache_key, Arc::clone(&arc_idx));
+                        Ok(arc_idx)
+                    }
+                    _ => Err(anyhow!("Archive type not yet supported")),
+                }
+            }
+            _ => Err(anyhow!("Not an archive node")),
         }
     }
 }

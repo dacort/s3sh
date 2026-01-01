@@ -107,7 +107,7 @@ impl ShellState {
     }
 
     /// Get the S3 client
-    pub fn s3_client(&self) -> &S3Client {
+    pub fn s3_client(&self) -> &Arc<S3Client> {
         &self.s3_client
     }
 

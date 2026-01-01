@@ -2,7 +2,10 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
 use super::{Command, ShellState};
-use crate::vfs::{VfsNode, VirtualPath};
+use crate::archive::zip::ZipHandler;
+use crate::archive::ArchiveHandler;
+use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
+use std::sync::Arc;
 
 pub struct CatCommand;
 
@@ -56,9 +59,83 @@ impl Command for CatCommand {
                 }
             }
 
-            VfsNode::ArchiveEntry { .. } => {
-                // Will implement in Phase 2
-                return Err(anyhow!("Reading from archives not yet implemented"));
+            VfsNode::ArchiveEntry {
+                archive,
+                path: file_path,
+                is_dir,
+                ..
+            } => {
+                if *is_dir {
+                    return Err(anyhow!("Is a directory: {}", path_str));
+                }
+
+                // Get bucket and key from archive
+                let (bucket, key, archive_type, index) = match archive.as_ref() {
+                    VfsNode::Archive {
+                        parent,
+                        archive_type,
+                        index,
+                    } => {
+                        let (b, k) = match parent.as_ref() {
+                            VfsNode::Object { bucket, key, .. } => (bucket, key),
+                            _ => return Err(anyhow!("Invalid archive parent")),
+                        };
+                        (b, k, archive_type, index)
+                    }
+                    _ => return Err(anyhow!("Not an archive")),
+                };
+
+                // Get or build index
+                let idx = if let Some(i) = index {
+                    Arc::clone(i)
+                } else {
+                    let cache_key = format!("s3://{}/{}", bucket, key);
+                    if let Some(cached) = state.cache().get(&cache_key) {
+                        cached
+                    } else {
+                        match archive_type {
+                            ArchiveType::Zip => {
+                                let handler = ZipHandler::new();
+                                let built = handler.build_index(state.s3_client(), bucket, key).await?;
+                                let arc = Arc::new(built);
+                                state.cache().put(cache_key, Arc::clone(&arc));
+                                arc
+                            }
+                            _ => return Err(anyhow!("Archive type not yet supported")),
+                        }
+                    }
+                };
+
+                // Extract the file
+                let bytes = match archive_type {
+                    ArchiveType::Zip => {
+                        let handler = ZipHandler::new();
+                        handler
+                            .extract_file(state.s3_client(), bucket, key, &idx, file_path)
+                            .await?
+                    }
+                    _ => return Err(anyhow!("Archive type not yet supported")),
+                };
+
+                // Try to display as UTF-8 text
+                match String::from_utf8(bytes.to_vec()) {
+                    Ok(text) => print!("{}", text),
+                    Err(_) => {
+                        eprintln!("Warning: File contains binary data");
+                        // Display first 1KB as hex
+                        let display_len = bytes.len().min(1024);
+                        for (i, byte) in bytes[..display_len].iter().enumerate() {
+                            if i % 16 == 0 {
+                                print!("\n{:08x}: ", i);
+                            }
+                            print!("{:02x} ", byte);
+                        }
+                        println!();
+                        if bytes.len() > 1024 {
+                            eprintln!("... ({} more bytes)", bytes.len() - 1024);
+                        }
+                    }
+                }
             }
 
             _ => {
