@@ -43,7 +43,7 @@ impl ArchiveHandler for TarHandler {
                     ArchiveType::Tar => Box::new(reader),
                     ArchiveType::TarGz => Box::new(flate2::read::GzDecoder::new(reader)),
                     ArchiveType::TarBz2 => Box::new(bzip2::read::BzDecoder::new(reader)),
-                    _ => return Err(anyhow!("Unsupported tar archive type: {:?}", archive_type)),
+                    _ => return Err(anyhow!("Unsupported tar archive type: {archive_type:?}")),
                 };
 
                 let mut archive = tar::Archive::new(reader);
@@ -53,7 +53,7 @@ impl ArchiveHandler for TarHandler {
                 // Iterate through all entries in the tar
                 for (index, entry_result) in archive.entries()?.enumerate() {
                     let entry =
-                        entry_result.context(format!("Failed to read tar entry {}", index))?;
+                        entry_result.context(format!("Failed to read tar entry {index}"))?;
 
                     let path = entry
                         .path()
@@ -85,7 +85,7 @@ impl ArchiveHandler for TarHandler {
                     // Each header is 512 bytes, data is padded to 512-byte blocks
                     if archive_type == ArchiveType::Tar {
                         current_offset += 512; // Header
-                        current_offset += ((size + 511) / 512) * 512; // Data (rounded up)
+                        current_offset += size.div_ceil(512) * 512; // Data (rounded up)
                     }
                 }
 
@@ -110,10 +110,10 @@ impl ArchiveHandler for TarHandler {
         let entry = index
             .entries
             .get(file_path)
-            .ok_or_else(|| anyhow!("File not found in archive: {}", file_path))?;
+            .ok_or_else(|| anyhow!("File not found in archive: {file_path}"))?;
 
         if entry.is_dir {
-            return Err(anyhow!("Cannot extract directory: {}", file_path));
+            return Err(anyhow!("Cannot extract directory: {file_path}"));
         }
 
         // Create S3 stream
@@ -133,7 +133,7 @@ impl ArchiveHandler for TarHandler {
                 ArchiveType::Tar => Box::new(reader),
                 ArchiveType::TarGz => Box::new(flate2::read::GzDecoder::new(reader)),
                 ArchiveType::TarBz2 => Box::new(bzip2::read::BzDecoder::new(reader)),
-                _ => return Err(anyhow!("Unsupported tar archive type: {:?}", archive_type)),
+                _ => return Err(anyhow!("Unsupported tar archive type: {archive_type:?}")),
             };
 
             let mut archive = tar::Archive::new(reader);
@@ -166,7 +166,7 @@ impl ArchiveHandler for TarHandler {
                 }
             }
 
-            Err(anyhow!("File not found in tar archive: {}", target_path))
+            Err(anyhow!("File not found in tar archive: {target_path}"))
         })
         .await
         .context("Failed to join blocking task")?
@@ -185,7 +185,7 @@ impl ArchiveHandler for TarHandler {
         let search_prefix = if normalized_path.is_empty() {
             String::new()
         } else {
-            format!("{}/", normalized_path)
+            format!("{normalized_path}/")
         };
 
         let mut result = Vec::new();
@@ -219,9 +219,9 @@ impl ArchiveHandler for TarHandler {
                     // We haven't seen this directory yet
                     // Try to find if there's an actual directory entry for it
                     let dir_path = if search_prefix.is_empty() {
-                        format!("{}/", dir_name)
+                        format!("{dir_name}/")
                     } else {
-                        format!("{}{}/", search_prefix, dir_name)
+                        format!("{search_prefix}{dir_name}/")
                     };
 
                     if let Some(dir_entry) = index.entries.get(&dir_path) {

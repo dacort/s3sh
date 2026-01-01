@@ -197,7 +197,7 @@ impl ShellCompleter {
     fn node_to_cache_key(&self, node: &VfsNode) -> String {
         match node {
             VfsNode::Root => "/".to_string(),
-            VfsNode::Bucket { name } => format!("/{}", name),
+            VfsNode::Bucket { name } => format!("/{name}"),
             VfsNode::Prefix { bucket, prefix } => {
                 format!("/{}/{}", bucket, prefix.trim_end_matches('/'))
             }
@@ -376,10 +376,10 @@ impl ShellCompleter {
             VfsNode::Prefix { bucket, prefix } => {
                 if prefix.trim_end_matches('/').contains('/') {
                     let parent_prefix =
-                        prefix.trim_end_matches('/').rsplitn(2, '/').nth(1).unwrap();
+                        prefix.trim_end_matches('/').rsplit_once('/').unwrap().0;
                     VfsNode::Prefix {
                         bucket: bucket.clone(),
-                        prefix: format!("{}/", parent_prefix),
+                        prefix: format!("{parent_prefix}/"),
                     }
                 } else {
                     VfsNode::Bucket {
@@ -399,11 +399,11 @@ impl ShellCompleter {
             },
             VfsNode::Bucket { name: bucket } => VfsNode::Prefix {
                 bucket: bucket.clone(),
-                prefix: format!("{}/", name),
+                prefix: format!("{name}/"),
             },
             VfsNode::Prefix { bucket, prefix } => VfsNode::Prefix {
                 bucket: bucket.clone(),
-                prefix: format!("{}{}/", prefix, name),
+                prefix: format!("{prefix}{name}/"),
             },
             _ => current.clone(),
         }

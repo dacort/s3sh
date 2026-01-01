@@ -64,7 +64,7 @@ impl Command for CdCommand {
 
         // Verify the target is navigable
         if !current.is_navigable() {
-            return Err(anyhow!("Not a directory: {}", path_str));
+            return Err(anyhow!("Not a directory: {path_str}"));
         }
 
         state.set_current_node(current.clone());
@@ -88,10 +88,10 @@ impl CdCommand {
                 // Remove the last segment
                 if prefix.trim_end_matches('/').contains('/') {
                     let parent_prefix =
-                        prefix.trim_end_matches('/').rsplitn(2, '/').nth(1).unwrap();
+                        prefix.trim_end_matches('/').rsplit_once('/').unwrap().0;
                     Ok(VfsNode::Prefix {
                         bucket: bucket.clone(),
-                        prefix: format!("{}/", parent_prefix),
+                        prefix: format!("{parent_prefix}/"),
                     })
                 } else {
                     // At top of bucket
@@ -104,10 +104,10 @@ impl CdCommand {
             VfsNode::Object { bucket, key, .. } => {
                 // Go to parent prefix or bucket
                 if key.contains('/') {
-                    let parent_prefix = key.rsplitn(2, '/').nth(1).unwrap();
+                    let parent_prefix = key.rsplit_once('/').unwrap().0;
                     Ok(VfsNode::Prefix {
                         bucket: bucket.clone(),
-                        prefix: format!("{}/", parent_prefix),
+                        prefix: format!("{parent_prefix}/"),
                     })
                 } else {
                     Ok(VfsNode::Bucket {
@@ -122,10 +122,7 @@ impl CdCommand {
                 // Go up within the archive
                 if path.trim_end_matches('/').contains('/') {
                     let parent_path = path
-                        .trim_end_matches('/')
-                        .rsplitn(2, '/')
-                        .nth(1)
-                        .unwrap()
+                        .trim_end_matches('/').rsplit_once('/').unwrap().0
                         .to_string();
 
                     Ok(VfsNode::ArchiveEntry {
@@ -169,7 +166,7 @@ impl CdCommand {
                 }
 
                 // Try as prefix
-                let prefix_key = format!("{}/", segment);
+                let prefix_key = format!("{segment}/");
                 Ok(VfsNode::Prefix {
                     bucket: name.clone(),
                     prefix: prefix_key,
@@ -178,7 +175,7 @@ impl CdCommand {
 
             VfsNode::Prefix { bucket, prefix } => {
                 // Navigate within prefix
-                let full_key = format!("{}{}", prefix, segment);
+                let full_key = format!("{prefix}{segment}");
 
                 // Try as object first
                 if let Ok(metadata) = state.s3_client().head_object(bucket, &full_key).await {
@@ -191,7 +188,7 @@ impl CdCommand {
                 }
 
                 // Try as prefix
-                let prefix_key = format!("{}/", full_key);
+                let prefix_key = format!("{full_key}/");
                 Ok(VfsNode::Prefix {
                     bucket: bucket.clone(),
                     prefix: prefix_key,
@@ -215,7 +212,7 @@ impl CdCommand {
                     }
                 }
 
-                Err(anyhow!("Path not found in archive: {}", segment))
+                Err(anyhow!("Path not found in archive: {segment}"))
             }
 
             VfsNode::ArchiveEntry {
@@ -246,7 +243,7 @@ impl CdCommand {
                     }
                 }
 
-                Err(anyhow!("Path not found in archive: {}", target_path))
+                Err(anyhow!("Path not found in archive: {target_path}"))
             }
 
             VfsNode::Object { .. } => Err(anyhow!("Cannot cd from a file")),
@@ -260,8 +257,8 @@ impl CdCommand {
                 // Check if this is an archive by extension
                 if let Some(archive_type) = ArchiveType::from_path(key) {
                     // Show spinner while building index
-                    let filename = key.split('/').last().unwrap_or(key);
-                    let spinner = create_spinner(&format!("Building index for {}...", filename));
+                    let filename = key.split('/').next_back().unwrap_or(key);
+                    let spinner = create_spinner(&format!("Building index for {filename}..."));
 
                     // Handle different archive types
                     let index = match &archive_type {
@@ -276,8 +273,7 @@ impl CdCommand {
                         _ => {
                             spinner.finish_and_clear();
                             return Err(anyhow!(
-                                "Archive type not yet supported: {:?}",
-                                archive_type
+                                "Archive type not yet supported: {archive_type:?}"
                             ));
                         }
                     };
@@ -285,7 +281,7 @@ impl CdCommand {
                     spinner.finish_and_clear();
 
                     // Store in cache
-                    let cache_key = format!("s3://{}/{}", bucket, key);
+                    let cache_key = format!("s3://{bucket}/{key}");
                     state.cache().put(cache_key, Arc::new(index.clone()));
 
                     return Ok(VfsNode::Archive {
@@ -328,14 +324,14 @@ impl CdCommand {
                 };
 
                 // Check cache
-                let cache_key = format!("s3://{}/{}", bucket, key);
+                let cache_key = format!("s3://{bucket}/{key}");
                 if let Some(cached) = state.cache().get(&cache_key) {
                     return Ok(cached);
                 }
 
                 // Show spinner while building index
-                let filename = key.split('/').last().unwrap_or(key);
-                let spinner = create_spinner(&format!("Building index for {}...", filename));
+                let filename = key.split('/').next_back().unwrap_or(key);
+                let spinner = create_spinner(&format!("Building index for {filename}..."));
 
                 // Build the index
                 let idx = match archive_type {
@@ -430,7 +426,7 @@ impl CdCommand {
                 let prefix = if current_path.is_empty() {
                     String::new()
                 } else {
-                    format!("{}/", current_path)
+                    format!("{current_path}/")
                 };
 
                 for (path, entry) in &idx.entries {
@@ -477,7 +473,7 @@ impl CdCommand {
                 let prefix = if current_path.is_empty() {
                     String::new()
                 } else {
-                    format!("{}/", current_path)
+                    format!("{current_path}/")
                 };
 
                 for (entry_path, entry) in &idx.entries {
@@ -519,7 +515,7 @@ impl CdCommand {
     fn node_to_cache_key(&self, node: &VfsNode) -> String {
         match node {
             VfsNode::Root => "/".to_string(),
-            VfsNode::Bucket { name } => format!("/{}", name),
+            VfsNode::Bucket { name } => format!("/{name}"),
             VfsNode::Prefix { bucket, prefix } => {
                 format!("/{}/{}", bucket, prefix.trim_end_matches('/'))
             }

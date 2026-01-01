@@ -112,7 +112,7 @@ impl ShellState {
             let cmd = Arc::clone(command);
             cmd.execute(self, args).await
         } else {
-            Err(anyhow!("Unknown command: {}", cmd_name))
+            Err(anyhow!("Unknown command: {cmd_name}"))
         }
     }
 
@@ -165,12 +165,12 @@ impl ShellState {
     fn node_to_path(&self, node: &VfsNode) -> VirtualPath {
         match node {
             VfsNode::Root => VirtualPath::parse("/"),
-            VfsNode::Bucket { name } => VirtualPath::parse(&format!("/{}", name)),
+            VfsNode::Bucket { name } => VirtualPath::parse(&format!("/{name}")),
             VfsNode::Prefix { bucket, prefix } => {
                 VirtualPath::parse(&format!("/{}/{}", bucket, prefix.trim_end_matches('/')))
             }
             VfsNode::Object { bucket, key, .. } => {
-                VirtualPath::parse(&format!("/{}/{}", bucket, key))
+                VirtualPath::parse(&format!("/{bucket}/{key}"))
             }
             VfsNode::Archive { parent, .. } => self.node_to_path(parent),
             VfsNode::ArchiveEntry { archive, path, .. } => {

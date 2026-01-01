@@ -54,7 +54,7 @@ impl ArchiveIndex {
     pub fn find_entry(&self, path: &str) -> Option<&ArchiveEntry> {
         self.entries
             .get(path)
-            .or_else(|| self.entries.get(&format!("{}/", path)))
+            .or_else(|| self.entries.get(&format!("{path}/")))
     }
 }
 

@@ -38,7 +38,7 @@ impl ArchiveHandler for ZipHandler {
                 for i in 0..zip.len() {
                     let file = zip
                         .by_index(i)
-                        .context(format!("Failed to read zip entry {}", i))?;
+                        .context(format!("Failed to read zip entry {i}"))?;
 
                     let name = file.name().to_string();
                     let is_dir = file.is_dir();
@@ -79,10 +79,10 @@ impl ArchiveHandler for ZipHandler {
         let entry = index
             .entries
             .get(file_path)
-            .ok_or_else(|| anyhow!("File not found in archive: {}", file_path))?;
+            .ok_or_else(|| anyhow!("File not found in archive: {file_path}"))?;
 
         if entry.is_dir {
-            return Err(anyhow!("Cannot extract directory: {}", file_path));
+            return Err(anyhow!("Cannot extract directory: {file_path}"));
         }
 
         // Create a new stream for extraction
@@ -100,7 +100,7 @@ impl ArchiveHandler for ZipHandler {
             // Extract by index (stored in offset field)
             let mut file = zip
                 .by_index(index_num)
-                .context(format!("Failed to read zip entry at index {}", index_num))?;
+                .context(format!("Failed to read zip entry at index {index_num}"))?;
 
             // Read the entire file into memory
             let mut buffer = Vec::new();
@@ -126,7 +126,7 @@ impl ArchiveHandler for ZipHandler {
         let search_prefix = if normalized_path.is_empty() {
             String::new()
         } else {
-            format!("{}/", normalized_path)
+            format!("{normalized_path}/")
         };
 
         let mut result = Vec::new();
@@ -160,9 +160,9 @@ impl ArchiveHandler for ZipHandler {
                     // We haven't seen this directory yet
                     // Try to find if there's an actual directory entry for it
                     let dir_path = if search_prefix.is_empty() {
-                        format!("{}/", dir_name)
+                        format!("{dir_name}/")
                     } else {
-                        format!("{}{}/", search_prefix, dir_name)
+                        format!("{search_prefix}{dir_name}/")
                     };
 
                     if let Some(dir_entry) = index.entries.get(&dir_path) {
@@ -179,6 +179,12 @@ impl ArchiveHandler for ZipHandler {
         }
 
         result
+    }
+}
+
+impl Default for ZipHandler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

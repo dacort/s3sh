@@ -84,7 +84,7 @@ impl S3Client {
             }
             Err(e) => {
                 // Check if error contains region information
-                let error_msg = format!("{:?}", e);
+                let error_msg = format!("{e:?}");
                 if error_msg.contains("PermanentRedirect") || error_msg.contains("301") {
                     // Try to extract region from error
                     // AWS returns the region in the error for redirects
@@ -106,8 +106,7 @@ impl S3Client {
                     }
                 }
                 Err(anyhow::anyhow!(
-                    "Failed to determine bucket region: {}",
-                    bucket
+                    "Failed to determine bucket region: {bucket}"
                 ))
             }
         }
@@ -147,10 +146,8 @@ impl S3Client {
             .map(|b| BucketInfo {
                 name: b.name().unwrap_or("").to_string(),
                 creation_date: b.creation_date().and_then(|d| {
-                    Some(
-                        d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime)
-                            .ok()?,
-                    )
+                    d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime)
+                            .ok()
                 }),
             })
             .collect();
@@ -179,7 +176,7 @@ impl S3Client {
         let resp = req
             .send()
             .await
-            .context(format!("Failed to list objects in bucket: {}", bucket))?;
+            .context(format!("Failed to list objects in bucket: {bucket}"))?;
 
         let prefixes = resp
             .common_prefixes()
@@ -195,10 +192,8 @@ impl S3Client {
                 key: obj.key().unwrap_or("").to_string(),
                 size: obj.size().unwrap_or(0) as u64,
                 last_modified: obj.last_modified().and_then(|d| {
-                    Some(
-                        d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime)
-                            .ok()?,
-                    )
+                    d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime)
+                            .ok()
                 }),
             })
             .collect();
@@ -216,8 +211,7 @@ impl S3Client {
             .send()
             .await
             .context(format!(
-                "Failed to get metadata for s3://{}/{}",
-                bucket, key
+                "Failed to get metadata for s3://{bucket}/{key}"
             ))?;
 
         Ok(ObjectMetadata {
@@ -234,7 +228,7 @@ impl S3Client {
             .key(key)
             .send()
             .await
-            .context(format!("Failed to get object s3://{}/{}", bucket, key))?;
+            .context(format!("Failed to get object s3://{bucket}/{key}"))?;
 
         let bytes = resp
             .body
@@ -265,8 +259,7 @@ impl S3Client {
             .send()
             .await
             .context(format!(
-                "Failed to get object range s3://{}/{}",
-                bucket, key
+                "Failed to get object range s3://{bucket}/{key}"
             ))?;
 
         let bytes = resp

@@ -220,7 +220,7 @@ async fn test_cat_command() {
 
     // Test: cat a nested file with absolute path
     let result = cat_cmd
-        .execute(&mut shell, &[format!("/{}/dir/nested.txt", TEST_BUCKET)])
+        .execute(&mut shell, &[format!("/{TEST_BUCKET}/dir/nested.txt")])
         .await;
     assert!(
         result.is_ok(),
