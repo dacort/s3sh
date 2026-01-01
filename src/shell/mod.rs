@@ -172,7 +172,7 @@ impl ShellState {
 
     /// Get the prompt string
     pub fn prompt(&self) -> String {
-        format!("3xplore:{} $ ", self.current_path())
+        format!("s3sh:{} $ ", self.current_path())
     }
 
     /// Parse command line respecting quotes (both single and double)

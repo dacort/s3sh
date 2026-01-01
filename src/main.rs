@@ -13,7 +13,7 @@ use rustyline::Editor;
 async fn main() -> anyhow::Result<()> {
     // Print welcome message
     println!("{}", "=".repeat(60).cyan());
-    println!("{}", "  3xplore - S3 Explorer Shell".bold().cyan());
+    println!("{}", "  s3sh - The S3 Shell".bold().cyan());
     println!("{}", "  Navigate S3 buckets like a Unix shell".cyan());
     println!("{}", "=".repeat(60).cyan());
     println!();
@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Load history if available
     let history_file = dirs::home_dir().map(|mut p| {
-        p.push(".3xplore_history");
+        p.push(".s3sh_history");
         p
     });
 

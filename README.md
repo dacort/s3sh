@@ -1,7 +1,7 @@
-# 3xplore - Interactive S3 Explorer Shell
+# s3sh - The S3 Shell
 
 ## Overview
-3xplore is a CLI tool for exploring Amazon S3 buckets with a Unix-like shell interface. Navigate S3 buckets and prefixes like directories, and seamlessly explore archive contents (tar, tar.gz, tar.bz2, zip) without downloading entire files.
+s3sh is an interactive S3 shell for exploring Amazon S3 buckets with Unix-like commands. Navigate S3 buckets and prefixes like directories, and seamlessly explore archive contents (tar, tar.gz, tar.bz2, zip) without downloading entire files.
 
 ## Key Features
 - **Unix-like Commands** - Use familiar `ls`, `cd`, `cat`, `pwd` commands to navigate S3
@@ -12,13 +12,13 @@
 ## Installation
 Available via crates.io:
 ```bash
-cargo install s3xplore
+cargo install s3sh
 ```
 
 Or build from source:
 ```bash
-git clone https://github.com/dacort/3xplore.git
-cd 3xplore
+git clone https://github.com/dacort/s3sh.git
+cd s3sh
 cargo build --release
 ```
 
@@ -26,7 +26,7 @@ cargo build --release
 
 Launch the interactive shell:
 ```bash
-3xplore
+s3sh
 ```
 
 ### Basic Commands
@@ -34,22 +34,22 @@ Launch the interactive shell:
 Navigate S3 like a filesystem:
 ```bash
 # List buckets at root
-3xplore:/ $ ls
+s3sh:/ $ ls
 
 # Navigate into a bucket
-3xplore:/ $ cd my-bucket
+s3sh:/ $ cd my-bucket
 
 # List objects and prefixes
-3xplore:/my-bucket $ ls
+s3sh:/my-bucket $ ls
 
 # Navigate through prefixes
-3xplore:/my-bucket $ cd logs/2024/
+s3sh:/my-bucket $ cd logs/2024/
 
 # View file contents
-3xplore:/my-bucket/logs/2024 $ cat error.log
+s3sh:/my-bucket/logs/2024 $ cat error.log
 
 # Show current location
-3xplore:/my-bucket/logs/2024 $ pwd
+s3sh:/my-bucket/logs/2024 $ pwd
 ```
 
 ### Archive Navigation
@@ -57,16 +57,16 @@ Navigate S3 like a filesystem:
 Explore archives without downloading:
 ```bash
 # Navigate into an archive
-3xplore:/my-bucket $ cd backups/data.tar.gz
+s3sh:/my-bucket $ cd backups/data.tar.gz
 
 # List archive contents
-3xplore:/my-bucket/backups/data.tar.gz $ ls
+s3sh:/my-bucket/backups/data.tar.gz $ ls
 
 # Navigate within the archive
-3xplore:/my-bucket/backups/data.tar.gz $ cd configs/
+s3sh:/my-bucket/backups/data.tar.gz $ cd configs/
 
 # View files from inside archives
-3xplore:/my-bucket/backups/data.tar.gz/configs $ cat app.yml
+s3sh:/my-bucket/backups/data.tar.gz/configs $ cat app.yml
 ```
 
 ### Tab Completion
@@ -74,17 +74,17 @@ Explore archives without downloading:
 Smart completion based on context:
 ```bash
 # Tab completes bucket names
-3xplore:/ $ cd my-<TAB>
+s3sh:/ $ cd my-<TAB>
 
 # Tab completes objects and prefixes
-3xplore:/my-bucket $ cd log<TAB>
+s3sh:/my-bucket $ cd log<TAB>
 
 # cd only shows directories
-3xplore:/my-bucket $ cd <TAB>
+s3sh:/my-bucket $ cd <TAB>
 logs/  backups/  configs/  # Only directories shown
 
 # cat shows all files
-3xplore:/my-bucket $ cat <TAB>
+s3sh:/my-bucket $ cat <TAB>
 logs/  data.json  config.yml  # Files and directories
 
 ## Supported Archive Formats
@@ -95,7 +95,7 @@ logs/  data.json  config.yml  # Files and directories
 
 ## AWS Credentials
 
-3xplore uses the AWS SDK for Rust and respects standard AWS credential configuration:
+s3sh uses the AWS SDK for Rust and respects standard AWS credential configuration:
 - Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
 - AWS credentials file (`~/.aws/credentials`)
 - IAM instance profile (when running on EC2)

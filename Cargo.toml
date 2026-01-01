@@ -1,18 +1,18 @@
 [package]
-name = "s3xplore"
+name = "s3sh"
 version = "0.1.0"
 edition = "2024"
 authors = ["Damon Cortesi <dacort@github.com>"]
-description = "Interactive S3 explorer shell with Unix-like commands and archive navigation"
+description = "Interactive S3 shell with Unix-like commands and archive navigation"
 license = "MIT"
-repository = "https://github.com/dacort/3xplore"
-homepage = "https://github.com/dacort/3xplore"
+repository = "https://github.com/dacort/s3sh"
+homepage = "https://github.com/dacort/s3sh"
 keywords = ["s3", "aws", "cli", "shell", "explorer"]
 categories = ["command-line-utilities", "filesystem"]
 readme = "README.md"
 
 [[bin]]
-name = "3xplore"
+name = "s3sh"
 path = "src/main.rs"
 
 [dependencies]
