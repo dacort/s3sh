@@ -67,7 +67,14 @@ impl Command for CdCommand {
             return Err(anyhow!("Not a directory: {}", path_str));
         }
 
-        state.set_current_node(current);
+        state.set_current_node(current.clone());
+
+        // Update completion cache with new directory contents
+        if let Ok(entries) = self.collect_entries_for_completion(state, &current).await {
+            let cache_key = self.node_to_cache_key(&current);
+            state.update_completions(cache_key, entries);
+        }
+
         Ok(())
     }
 }
@@ -356,6 +363,167 @@ impl CdCommand {
                 Ok(arc_idx)
             }
             _ => Err(anyhow!("Not an archive node")),
+        }
+    }
+
+    /// Collect entry names from current directory for tab completion
+    async fn collect_entries_for_completion(
+        &self,
+        state: &ShellState,
+        node: &VfsNode,
+    ) -> Result<Vec<String>> {
+        let mut entries = Vec::new();
+
+        match node {
+            VfsNode::Root => {
+                // List buckets
+                if let Ok(buckets) = state.s3_client().list_buckets().await {
+                    entries.extend(buckets.into_iter().map(|b| b.name));
+                }
+            }
+
+            VfsNode::Bucket { name } => {
+                // List prefixes and objects in bucket
+                if let Ok(result) = state.s3_client().list_objects(name, "", Some("/")).await {
+                    // Add prefixes (directories)
+                    for prefix in result.prefixes {
+                        let name = prefix
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&prefix);
+                        entries.push(name.to_string());
+                    }
+                    // Add objects
+                    for obj in result.objects {
+                        let name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
+                        entries.push(name.to_string());
+                    }
+                }
+            }
+
+            VfsNode::Prefix { bucket, prefix } => {
+                // List prefixes and objects at this prefix
+                if let Ok(result) = state.s3_client().list_objects(bucket, prefix, Some("/")).await {
+                    for pfx in result.prefixes {
+                        let name = pfx
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&pfx);
+                        entries.push(name.to_string());
+                    }
+                    for obj in result.objects {
+                        let name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
+                        entries.push(name.to_string());
+                    }
+                }
+            }
+
+            VfsNode::Archive { index, .. } => {
+                // Get the archive index
+                let idx = match index {
+                    Some(idx) => idx.clone(),
+                    None => return Ok(entries),
+                };
+
+                let current_path = String::new();
+
+                // Collect direct children
+                let prefix = if current_path.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}/", current_path)
+                };
+
+                for (path, entry) in &idx.entries {
+                    // Skip paths that don't start with our prefix
+                    if !prefix.is_empty() && !path.starts_with(&prefix) {
+                        continue;
+                    }
+
+                    // Get the relative path from current location
+                    let rel_path = if prefix.is_empty() {
+                        path.as_str()
+                    } else {
+                        &path[prefix.len()..]
+                    };
+
+                    // Only include direct children (no slashes in relative path)
+                    if !rel_path.contains('/') && !rel_path.is_empty() {
+                        let name = if entry.is_dir {
+                            rel_path.trim_end_matches('/').to_string()
+                        } else {
+                            rel_path.to_string()
+                        };
+                        if !entries.contains(&name) {
+                            entries.push(name);
+                        }
+                    }
+                }
+            }
+
+            VfsNode::ArchiveEntry { archive, path, .. } => {
+                // Get the archive index from parent
+                let idx = if let VfsNode::Archive { index: Some(idx), .. } = &**archive {
+                    idx.clone()
+                } else {
+                    return Ok(entries);
+                };
+
+                let current_path = path.trim_end_matches('/').to_string();
+
+                // Collect direct children
+                let prefix = if current_path.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}/", current_path)
+                };
+
+                for (entry_path, entry) in &idx.entries {
+                    // Skip paths that don't start with our prefix
+                    if !prefix.is_empty() && !entry_path.starts_with(&prefix) {
+                        continue;
+                    }
+
+                    // Get the relative path from current location
+                    let rel_path = if prefix.is_empty() {
+                        entry_path.as_str()
+                    } else {
+                        &entry_path[prefix.len()..]
+                    };
+
+                    // Only include direct children (no slashes in relative path)
+                    if !rel_path.contains('/') && !rel_path.is_empty() {
+                        let name = if entry.is_dir {
+                            rel_path.trim_end_matches('/').to_string()
+                        } else {
+                            rel_path.to_string()
+                        };
+                        if !entries.contains(&name) {
+                            entries.push(name);
+                        }
+                    }
+                }
+            }
+
+            VfsNode::Object { .. } => {
+                // Can't list contents of a file
+            }
+        }
+
+        Ok(entries)
+    }
+
+    /// Convert VfsNode to cache key
+    fn node_to_cache_key(&self, node: &VfsNode) -> String {
+        match node {
+            VfsNode::Root => "/".to_string(),
+            VfsNode::Bucket { name } => format!("/{}", name),
+            VfsNode::Prefix { bucket, prefix } => {
+                format!("/{}/{}", bucket, prefix.trim_end_matches('/'))
+            }
+            _ => "/".to_string(),
         }
     }
 }

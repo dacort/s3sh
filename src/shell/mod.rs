@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod completion;
 
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
@@ -8,6 +9,7 @@ use crate::cache::ArchiveCache;
 use crate::s3::S3Client;
 use crate::vfs::{VfsNode, VirtualPath};
 use commands::Command;
+pub use completion::{CompletionCache, ShellCompleter};
 
 /// Shell state - tracks current location and provides command execution
 pub struct ShellState {
@@ -17,6 +19,8 @@ pub struct ShellState {
     s3_client: Arc<S3Client>,
     /// Archive cache
     cache: ArchiveCache,
+    /// Tab completion cache
+    completion_cache: CompletionCache,
     /// Registered commands
     commands: HashMap<String, Arc<dyn Command>>,
 }
@@ -26,11 +30,13 @@ impl ShellState {
     pub async fn new() -> Result<Self> {
         let s3_client = Arc::new(S3Client::new().await?);
         let cache = ArchiveCache::new(100);
+        let completion_cache = CompletionCache::new(Arc::clone(&s3_client));
 
         let mut state = ShellState {
             current_node: VfsNode::Root,
             s3_client,
             cache,
+            completion_cache,
             commands: HashMap::new(),
         };
 
@@ -96,7 +102,8 @@ impl ShellState {
 
     /// Set the current node
     pub fn set_current_node(&mut self, node: VfsNode) {
-        self.current_node = node;
+        self.current_node = node.clone();
+        self.completion_cache.set_current_node(node);
     }
 
     /// Get the S3 client
@@ -107,6 +114,16 @@ impl ShellState {
     /// Get the cache
     pub fn cache(&self) -> &ArchiveCache {
         &self.cache
+    }
+
+    /// Get the completion cache
+    pub fn completion_cache(&self) -> &CompletionCache {
+        &self.completion_cache
+    }
+
+    /// Update completion cache with current directory entries
+    pub fn update_completions(&self, path: String, entries: Vec<String>) {
+        self.completion_cache.update_entries(path, entries);
     }
 
     /// Get the current virtual path

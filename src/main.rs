@@ -7,7 +7,7 @@ mod vfs;
 
 use colored::*;
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::Editor;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,8 +30,16 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // Create readline editor
-    let mut rl = DefaultEditor::new()?;
+    // Populate initial completion cache with buckets
+    if let Ok(buckets) = state.s3_client().list_buckets().await {
+        let bucket_names: Vec<String> = buckets.into_iter().map(|b| b.name).collect();
+        state.update_completions("/".to_string(), bucket_names);
+    }
+
+    // Create readline editor with tab completion
+    let completer = shell::ShellCompleter::new(state.completion_cache().clone());
+    let mut rl = Editor::new()?;
+    rl.set_helper(Some(completer));
 
     // Load history if available
     let history_file = dirs::home_dir().map(|mut p| {
