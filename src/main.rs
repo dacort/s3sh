@@ -30,11 +30,8 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // Populate initial completion cache with buckets
-    if let Ok(buckets) = state.s3_client().list_buckets().await {
-        let bucket_names: Vec<String> = buckets.into_iter().map(|b| b.name).collect();
-        state.update_completions("/".to_string(), bucket_names);
-    }
+    // Don't pre-populate cache - let lazy loader fetch with accurate metadata
+    // This ensures command-aware filtering (cd shows only dirs, cat shows all)
 
     // Create readline editor with tab completion
     let completer = shell::ShellCompleter::new(state.completion_cache().clone());

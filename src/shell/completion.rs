@@ -6,11 +6,18 @@ use std::sync::{Arc, RwLock};
 use crate::s3::S3Client;
 use crate::vfs::VfsNode;
 
+/// Entry in completion cache with metadata
+#[derive(Clone, Debug)]
+pub struct CompletionEntry {
+    pub name: String,
+    pub is_dir: bool,
+}
+
 /// Cache of available completions for different paths
 #[derive(Clone)]
 pub struct CompletionCache {
-    /// Cached entries by path (path -> set of entry names)
-    entries: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// Cached entries by path (path -> entries with metadata)
+    entries: Arc<RwLock<HashMap<String, Vec<CompletionEntry>>>>,
     /// Available commands
     commands: Vec<String>,
     /// Current VFS node
@@ -53,14 +60,14 @@ impl CompletionCache {
     }
 
     /// Update the cached entries for a specific path
-    pub fn update_entries(&self, path: String, entries: Vec<String>) {
+    pub fn update_entries(&self, path: String, entries: Vec<CompletionEntry>) {
         if let Ok(mut cache) = self.entries.write() {
             cache.insert(path, entries);
         }
     }
 
     /// Get cached entries for a path
-    pub fn get_entries(&self, path: &str) -> Option<Vec<String>> {
+    pub fn get_entries(&self, path: &str) -> Option<Vec<CompletionEntry>> {
         self.entries
             .read()
             .ok()
@@ -102,7 +109,7 @@ impl ShellCompleter {
     }
 
     /// Complete a path (file or directory)
-    fn complete_path(&self, path: &str) -> Vec<Pair> {
+    fn complete_path(&self, path: &str, command: &str) -> Vec<Pair> {
         // Determine which directory we're completing in
         let (dir_path, file_prefix) = if path.contains('/') {
             // Multi-segment path like "movies/" or "movies/id"
@@ -136,15 +143,25 @@ impl ShellCompleter {
         // Filter and format completions
         entries
             .into_iter()
-            .filter(|entry| entry.starts_with(file_prefix))
+            .filter(|entry| {
+                // Filter by prefix
+                if !entry.name.starts_with(file_prefix) {
+                    return false;
+                }
+                // Filter by command: cd only shows directories
+                if command == "cd" && !entry.is_dir {
+                    return false;
+                }
+                true
+            })
             .map(|entry| {
                 let replacement = if dir_path.is_empty() {
-                    entry.clone()
+                    entry.name.clone()
                 } else {
-                    format!("{}{}", dir_path, entry)
+                    format!("{}{}", dir_path, entry.name)
                 };
                 Pair {
-                    display: entry,
+                    display: entry.name,
                     replacement,
                 }
             })
@@ -215,7 +232,7 @@ impl ShellCompleter {
     }
 
     /// Fetch entries for a path (blocks on async S3 call)
-    fn fetch_entries_for_path(&self, rel_path: &str) -> Result<Vec<String>, ()> {
+    fn fetch_entries_for_path(&self, rel_path: &str) -> Result<Vec<CompletionEntry>, ()> {
         let current = self.cache.get_current_node();
         let s3_client = self.cache.s3_client().clone();
         let rel_path = rel_path.to_string();
@@ -241,7 +258,7 @@ impl ShellCompleter {
         s3_client: &S3Client,
         current: &VfsNode,
         rel_path: &str,
-    ) -> Result<Vec<String>, ()> {
+    ) -> Result<Vec<CompletionEntry>, ()> {
         // Navigate to target node based on current + rel_path
         let target = Self::resolve_target_node_static(current, rel_path);
 
@@ -249,20 +266,34 @@ impl ShellCompleter {
             VfsNode::Root => {
                 // List buckets
                 let buckets = s3_client.list_buckets().await.map_err(|_| ())?;
-                Ok(buckets.into_iter().map(|b| b.name).collect())
+                Ok(buckets
+                    .into_iter()
+                    .map(|b| CompletionEntry {
+                        name: b.name,
+                        is_dir: true,
+                    })
+                    .collect())
             }
             VfsNode::Bucket { ref name } => {
                 // List in bucket root
                 let result = s3_client.list_objects(name, "", Some("/")).await.map_err(|_| ())?;
                 let mut entries = Vec::new();
 
+                // Prefixes are directories
                 for prefix in result.prefixes {
                     let name = prefix.trim_end_matches('/').rsplit('/').next().unwrap_or(&prefix);
-                    entries.push(name.to_string());
+                    entries.push(CompletionEntry {
+                        name: name.to_string(),
+                        is_dir: true,
+                    });
                 }
+                // Objects are files
                 for obj in result.objects {
                     let name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
-                    entries.push(name.to_string());
+                    entries.push(CompletionEntry {
+                        name: name.to_string(),
+                        is_dir: false,
+                    });
                 }
 
                 Ok(entries)
@@ -272,13 +303,21 @@ impl ShellCompleter {
                 let result = s3_client.list_objects(bucket, prefix, Some("/")).await.map_err(|_| ())?;
                 let mut entries = Vec::new();
 
+                // Prefixes are directories
                 for pfx in result.prefixes {
                     let name = pfx.trim_end_matches('/').rsplit('/').next().unwrap_or(&pfx);
-                    entries.push(name.to_string());
+                    entries.push(CompletionEntry {
+                        name: name.to_string(),
+                        is_dir: true,
+                    });
                 }
+                // Objects are files
                 for obj in result.objects {
                     let name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
-                    entries.push(name.to_string());
+                    entries.push(CompletionEntry {
+                        name: name.to_string(),
+                        is_dir: false,
+                    });
                 }
 
                 Ok(entries)
@@ -380,6 +419,9 @@ impl Completer for ShellCompleter {
         let path_start = line.find(char::is_whitespace).unwrap_or(0);
         let path = line[path_start..].trim_start();
 
+        // Get the command name for filtering
+        let command = words[0];
+
         if path.is_empty() {
             // Just completed command, show all entries for current directory
             let current = self.cache.get_current_node();
@@ -400,15 +442,22 @@ impl Completer for ShellCompleter {
 
             let completions = entries
                 .into_iter()
+                .filter(|entry| {
+                    // Filter by command: cd only shows directories
+                    if command == "cd" && !entry.is_dir {
+                        return false;
+                    }
+                    true
+                })
                 .map(|entry| Pair {
-                    display: entry.clone(),
-                    replacement: entry,
+                    display: entry.name.clone(),
+                    replacement: entry.name,
                 })
                 .collect();
             return Ok((pos, completions));
         }
 
-        let completions = self.complete_path(path);
+        let completions = self.complete_path(path, command);
         let start = pos - path.split_whitespace().last().unwrap_or("").len();
         Ok((start, completions))
     }

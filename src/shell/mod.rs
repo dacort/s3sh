@@ -122,7 +122,16 @@ impl ShellState {
     }
 
     /// Update completion cache with current directory entries
-    pub fn update_completions(&self, path: String, entries: Vec<String>) {
+    pub fn update_completions(&self, path: String, entry_names: Vec<String>) {
+        // Convert string names to CompletionEntry
+        // We don't have is_dir info from cd, but the lazy loader will fetch accurate data
+        let entries: Vec<_> = entry_names
+            .into_iter()
+            .map(|name| completion::CompletionEntry {
+                name,
+                is_dir: true, // Assume dirs for now, will be corrected on lazy load
+            })
+            .collect();
         self.completion_cache.update_entries(path, entries);
     }
 

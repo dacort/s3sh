@@ -69,11 +69,8 @@ impl Command for CdCommand {
 
         state.set_current_node(current.clone());
 
-        // Update completion cache with new directory contents
-        if let Ok(entries) = self.collect_entries_for_completion(state, &current).await {
-            let cache_key = self.node_to_cache_key(&current);
-            state.update_completions(cache_key, entries);
-        }
+        // Don't pre-populate completion cache here - let lazy loader fetch accurate is_dir info
+        // This ensures cd only completes directories, cat completes everything
 
         Ok(())
     }
