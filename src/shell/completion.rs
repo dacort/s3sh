@@ -226,11 +226,9 @@ impl ShellCompleter {
         if let Some(suffix) = rel_path
             .strip_prefix("../")
             .or_else(|| rel_path.strip_prefix(".."))
-        {
-            if !suffix.is_empty() {
+            && !suffix.is_empty() {
                 key = format!("{}/{}", key.trim_end_matches('/'), suffix);
             }
-        }
 
         key
     }
