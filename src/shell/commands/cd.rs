@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::{Command, ShellState};
 use crate::archive::tar::TarHandler;
@@ -436,6 +438,16 @@ impl CdCommand {
             VfsNode::Object { bucket, key, size } => {
                 // Check if this is an archive by extension
                 if let Some(archive_type) = ArchiveType::from_path(key) {
+                    // Show spinner while building index
+                    let spinner = ProgressBar::new_spinner();
+                    spinner.set_style(
+                        ProgressStyle::default_spinner()
+                            .template("{spinner:.cyan} {msg}")
+                            .unwrap()
+                    );
+                    spinner.set_message(format!("Building index for {}...", key.split('/').last().unwrap_or(key)));
+                    spinner.enable_steady_tick(Duration::from_millis(100));
+
                     // Handle different archive types
                     let index = match &archive_type {
                         ArchiveType::Zip => {
@@ -447,12 +459,15 @@ impl CdCommand {
                             handler.build_index(state.s3_client(), bucket, key).await?
                         }
                         _ => {
+                            spinner.finish_and_clear();
                             return Err(anyhow!(
                                 "Archive type not yet supported: {:?}",
                                 archive_type
                             ));
                         }
                     };
+
+                    spinner.finish_and_clear();
 
                     // Store in cache
                     let cache_key = format!("s3://{}/{}", bucket, key);
@@ -503,6 +518,16 @@ impl CdCommand {
                     return Ok(cached);
                 }
 
+                // Show spinner while building index
+                let spinner = ProgressBar::new_spinner();
+                spinner.set_style(
+                    ProgressStyle::default_spinner()
+                        .template("{spinner:.cyan} {msg}")
+                        .unwrap()
+                );
+                spinner.set_message(format!("Building index for {}...", key.split('/').last().unwrap_or(key)));
+                spinner.enable_steady_tick(Duration::from_millis(100));
+
                 // Build the index
                 let idx = match archive_type {
                     ArchiveType::Zip => {
@@ -513,8 +538,14 @@ impl CdCommand {
                         let handler = TarHandler::new(archive_type.clone());
                         handler.build_index(state.s3_client(), bucket, key).await?
                     }
-                    _ => return Err(anyhow!("Archive type not yet supported")),
+                    _ => {
+                        spinner.finish_and_clear();
+                        return Err(anyhow!("Archive type not yet supported"));
+                    }
                 };
+
+                spinner.finish_and_clear();
+
                 let arc_idx = Arc::new(idx);
                 state.cache().put(cache_key, Arc::clone(&arc_idx));
                 Ok(arc_idx)

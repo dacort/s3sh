@@ -24,6 +24,7 @@ bzip2 = "0.5"
 # Shell/CLI
 rustyline = "14.0"
 colored = "2.2"
+indicatif = "0.17"
 
 # Async utilities
 async-trait = "0.1"

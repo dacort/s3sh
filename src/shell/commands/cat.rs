@@ -1,12 +1,14 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::sync::Arc;
+use std::time::Duration;
 
 use super::{Command, ShellState};
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
 use crate::archive::ArchiveHandler;
 use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
-use std::sync::Arc;
 
 pub struct CatCommand;
 
@@ -94,6 +96,16 @@ impl Command for CatCommand {
                     if let Some(cached) = state.cache().get(&cache_key) {
                         cached
                     } else {
+                        // Show spinner while building index
+                        let spinner = ProgressBar::new_spinner();
+                        spinner.set_style(
+                            ProgressStyle::default_spinner()
+                                .template("{spinner:.cyan} {msg}")
+                                .unwrap()
+                        );
+                        spinner.set_message(format!("Building index for {}...", key.split('/').last().unwrap_or(key)));
+                        spinner.enable_steady_tick(Duration::from_millis(100));
+
                         let built = match archive_type {
                             ArchiveType::Zip => {
                                 let handler = ZipHandler::new();
@@ -103,13 +115,29 @@ impl Command for CatCommand {
                                 let handler = TarHandler::new(archive_type.clone());
                                 handler.build_index(state.s3_client(), bucket, key).await?
                             }
-                            _ => return Err(anyhow!("Archive type not yet supported")),
+                            _ => {
+                                spinner.finish_and_clear();
+                                return Err(anyhow!("Archive type not yet supported"));
+                            }
                         };
+
+                        spinner.finish_and_clear();
+
                         let arc = Arc::new(built);
                         state.cache().put(cache_key, Arc::clone(&arc));
                         arc
                     }
                 };
+
+                // Show spinner while extracting file
+                let spinner = ProgressBar::new_spinner();
+                spinner.set_style(
+                    ProgressStyle::default_spinner()
+                        .template("{spinner:.cyan} {msg}")
+                        .unwrap()
+                );
+                spinner.set_message(format!("Extracting {}...", file_path.split('/').last().unwrap_or(file_path)));
+                spinner.enable_steady_tick(Duration::from_millis(100));
 
                 // Extract the file
                 let bytes = match archive_type {
@@ -125,8 +153,13 @@ impl Command for CatCommand {
                             .extract_file(state.s3_client(), bucket, key, &idx, file_path)
                             .await?
                     }
-                    _ => return Err(anyhow!("Archive type not yet supported")),
+                    _ => {
+                        spinner.finish_and_clear();
+                        return Err(anyhow!("Archive type not yet supported"));
+                    }
                 };
+
+                spinner.finish_and_clear();
 
                 // Try to display as UTF-8 text
                 match String::from_utf8(bytes.to_vec()) {

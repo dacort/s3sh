@@ -545,11 +545,18 @@ impl LsCommand {
             }
             VfsNode::Archive { index, .. } => {
                 if let Some(idx) = index {
-                    if let Some(entry) = idx.entries.get(segment) {
+                    // Try both with and without trailing slash (tar archives often include the slash)
+                    let segment_with_slash = format!("{}/", segment);
+                    let entry = idx.entries.get(segment)
+                        .or_else(|| idx.entries.get(&segment_with_slash));
+
+                    if let Some(entry) = entry {
                         if entry.is_dir {
+                            // Store the path without trailing slash for consistency
+                            let clean_path = entry.path.trim_end_matches('/').to_string();
                             return Ok(VfsNode::ArchiveEntry {
                                 archive: Box::new(current.clone()),
-                                path: segment.to_string(),
+                                path: clean_path,
                                 size: entry.size,
                                 is_dir: true,
                             });
@@ -566,11 +573,19 @@ impl LsCommand {
                         } else {
                             format!("{}/{}", path.trim_end_matches('/'), segment)
                         };
-                        if let Some(entry) = idx.entries.get(&target_path) {
+
+                        // Try both with and without trailing slash
+                        let target_path_with_slash = format!("{}/", target_path);
+                        let entry = idx.entries.get(&target_path)
+                            .or_else(|| idx.entries.get(&target_path_with_slash));
+
+                        if let Some(entry) = entry {
                             if entry.is_dir {
+                                // Store the path without trailing slash for consistency
+                                let clean_path = entry.path.trim_end_matches('/').to_string();
                                 return Ok(VfsNode::ArchiveEntry {
                                     archive: archive.clone(),
-                                    path: target_path,
+                                    path: clean_path,
                                     size: entry.size,
                                     is_dir: true,
                                 });
