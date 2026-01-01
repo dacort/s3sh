@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
 use super::{Command, ShellState};
+use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
 use crate::archive::ArchiveHandler;
 use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
@@ -93,16 +94,20 @@ impl Command for CatCommand {
                     if let Some(cached) = state.cache().get(&cache_key) {
                         cached
                     } else {
-                        match archive_type {
+                        let built = match archive_type {
                             ArchiveType::Zip => {
                                 let handler = ZipHandler::new();
-                                let built = handler.build_index(state.s3_client(), bucket, key).await?;
-                                let arc = Arc::new(built);
-                                state.cache().put(cache_key, Arc::clone(&arc));
-                                arc
+                                handler.build_index(state.s3_client(), bucket, key).await?
+                            }
+                            ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                                let handler = TarHandler::new(archive_type.clone());
+                                handler.build_index(state.s3_client(), bucket, key).await?
                             }
                             _ => return Err(anyhow!("Archive type not yet supported")),
-                        }
+                        };
+                        let arc = Arc::new(built);
+                        state.cache().put(cache_key, Arc::clone(&arc));
+                        arc
                     }
                 };
 
@@ -110,6 +115,12 @@ impl Command for CatCommand {
                 let bytes = match archive_type {
                     ArchiveType::Zip => {
                         let handler = ZipHandler::new();
+                        handler
+                            .extract_file(state.s3_client(), bucket, key, &idx, file_path)
+                            .await?
+                    }
+                    ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                        let handler = TarHandler::new(archive_type.clone());
                         handler
                             .extract_file(state.s3_client(), bucket, key, &idx, file_path)
                             .await?
@@ -191,6 +202,56 @@ impl CatCommand {
                     bucket: bucket.clone(),
                     key,
                     size: metadata.size,
+                })
+            }
+
+            VfsNode::Archive { index, .. } => {
+                // Resolve file at root of archive
+                let idx = if let Some(i) = index {
+                    Arc::clone(i)
+                } else {
+                    return Err(anyhow!("Archive index not available"));
+                };
+
+                // Try both with and without trailing slash
+                let path_with_slash = format!("{}/", path);
+                let entry = idx.entries.get(path)
+                    .or_else(|| idx.entries.get(&path_with_slash))
+                    .ok_or_else(|| anyhow!("File not found in archive: {}", path))?;
+
+                Ok(VfsNode::ArchiveEntry {
+                    archive: Box::new(current.clone()),
+                    path: path.to_string(),
+                    size: entry.size,
+                    is_dir: entry.is_dir,
+                })
+            }
+
+            VfsNode::ArchiveEntry { archive, path: current_path, .. } => {
+                // Resolve file relative to current path in archive
+                let idx = match archive.as_ref() {
+                    VfsNode::Archive { index: Some(i), .. } => Arc::clone(i),
+                    _ => return Err(anyhow!("Archive index not available")),
+                };
+
+                // Build full path
+                let full_path = if current_path.is_empty() {
+                    path.to_string()
+                } else {
+                    format!("{}/{}", current_path.trim_end_matches('/'), path)
+                };
+
+                // Try both with and without trailing slash
+                let full_path_with_slash = format!("{}/", full_path);
+                let entry = idx.entries.get(&full_path)
+                    .or_else(|| idx.entries.get(&full_path_with_slash))
+                    .ok_or_else(|| anyhow!("File not found in archive: {}", path))?;
+
+                Ok(VfsNode::ArchiveEntry {
+                    archive: archive.clone(),
+                    path: full_path,
+                    size: entry.size,
+                    is_dir: entry.is_dir,
                 })
             }
 

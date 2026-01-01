@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use super::{Command, ShellState};
+use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
 use crate::archive::ArchiveHandler;
 use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
@@ -199,12 +200,18 @@ impl CdCommand {
                 // Navigate within archive
                 let index = self.get_or_build_archive_index(state, current).await?;
 
-                // Check if segment exists in the archive
-                if let Some(entry) = index.entries.get(segment) {
+                // Try both with and without trailing slash (tar archives often include the slash)
+                let segment_with_slash = format!("{}/", segment);
+                let entry = index.entries.get(segment)
+                    .or_else(|| index.entries.get(&segment_with_slash));
+
+                if let Some(entry) = entry {
                     if entry.is_dir {
+                        // Store the path without trailing slash for consistency
+                        let clean_path = entry.path.trim_end_matches('/').to_string();
                         return Ok(VfsNode::ArchiveEntry {
                             archive: Box::new(current.clone()),
-                            path: segment.to_string(),
+                            path: clean_path,
                             size: entry.size,
                             is_dir: true,
                         });
@@ -225,12 +232,18 @@ impl CdCommand {
                     format!("{}/{}", current_path.trim_end_matches('/'), segment)
                 };
 
-                // Check if this path exists in the archive
-                if let Some(entry) = index.entries.get(&target_path) {
+                // Try both with and without trailing slash
+                let target_path_with_slash = format!("{}/", target_path);
+                let entry = index.entries.get(&target_path)
+                    .or_else(|| index.entries.get(&target_path_with_slash));
+
+                if let Some(entry) = entry {
                     if entry.is_dir {
+                        // Store the path without trailing slash for consistency
+                        let clean_path = entry.path.trim_end_matches('/').to_string();
                         return Ok(VfsNode::ArchiveEntry {
                             archive: archive.clone(),
-                            path: target_path,
+                            path: clean_path,
                             size: entry.size,
                             is_dir: true,
                         });
@@ -423,33 +436,37 @@ impl CdCommand {
             VfsNode::Object { bucket, key, size } => {
                 // Check if this is an archive by extension
                 if let Some(archive_type) = ArchiveType::from_path(key) {
-                    // For now, only handle Zip
-                    if matches!(archive_type, ArchiveType::Zip) {
-                        // Build the archive index
-                        let handler = ZipHandler::new();
-                        let index = handler
-                            .build_index(state.s3_client(), bucket, key)
-                            .await?;
+                    // Handle different archive types
+                    let index = match &archive_type {
+                        ArchiveType::Zip => {
+                            let handler = ZipHandler::new();
+                            handler.build_index(state.s3_client(), bucket, key).await?
+                        }
+                        ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                            let handler = TarHandler::new(archive_type.clone());
+                            handler.build_index(state.s3_client(), bucket, key).await?
+                        }
+                        _ => {
+                            return Err(anyhow!(
+                                "Archive type not yet supported: {:?}",
+                                archive_type
+                            ));
+                        }
+                    };
 
-                        // Store in cache
-                        let cache_key = format!("s3://{}/{}", bucket, key);
-                        state.cache().put(cache_key, Arc::new(index.clone()));
+                    // Store in cache
+                    let cache_key = format!("s3://{}/{}", bucket, key);
+                    state.cache().put(cache_key, Arc::new(index.clone()));
 
-                        return Ok(VfsNode::Archive {
-                            parent: Box::new(VfsNode::Object {
-                                bucket: bucket.clone(),
-                                key: key.clone(),
-                                size: *size,
-                            }),
-                            archive_type,
-                            index: Some(Arc::new(index)),
-                        });
-                    } else {
-                        return Err(anyhow!(
-                            "Archive type not yet supported: {:?}",
-                            archive_type
-                        ));
-                    }
+                    return Ok(VfsNode::Archive {
+                        parent: Box::new(VfsNode::Object {
+                            bucket: bucket.clone(),
+                            key: key.clone(),
+                            size: *size,
+                        }),
+                        archive_type,
+                        index: Some(Arc::new(index)),
+                    });
                 }
                 Ok(node)
             }
@@ -487,16 +504,20 @@ impl CdCommand {
                 }
 
                 // Build the index
-                match archive_type {
+                let idx = match archive_type {
                     ArchiveType::Zip => {
                         let handler = ZipHandler::new();
-                        let idx = handler.build_index(state.s3_client(), bucket, key).await?;
-                        let arc_idx = Arc::new(idx);
-                        state.cache().put(cache_key, Arc::clone(&arc_idx));
-                        Ok(arc_idx)
+                        handler.build_index(state.s3_client(), bucket, key).await?
                     }
-                    _ => Err(anyhow!("Archive type not yet supported")),
-                }
+                    ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                        let handler = TarHandler::new(archive_type.clone());
+                        handler.build_index(state.s3_client(), bucket, key).await?
+                    }
+                    _ => return Err(anyhow!("Archive type not yet supported")),
+                };
+                let arc_idx = Arc::new(idx);
+                state.cache().put(cache_key, Arc::clone(&arc_idx));
+                Ok(arc_idx)
             }
             _ => Err(anyhow!("Not an archive node")),
         }

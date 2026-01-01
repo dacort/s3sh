@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use colored::*;
 
 use super::{Command, ShellState};
+use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
 use crate::archive::ArchiveHandler;
 use crate::vfs::{ArchiveType, VfsNode};
@@ -207,22 +208,35 @@ impl Command for LsCommand {
                     if let Some(cached) = state.cache().get(&cache_key) {
                         cached
                     } else {
-                        match archive_type {
+                        let built = match archive_type {
                             ArchiveType::Zip => {
                                 let handler = ZipHandler::new();
-                                let built = handler.build_index(state.s3_client(), bucket, key).await?;
-                                let arc = Arc::new(built);
-                                state.cache().put(cache_key, Arc::clone(&arc));
-                                arc
+                                handler.build_index(state.s3_client(), bucket, key).await?
+                            }
+                            ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                                let handler = TarHandler::new(archive_type.clone());
+                                handler.build_index(state.s3_client(), bucket, key).await?
                             }
                             _ => return Err(anyhow!("Archive type not yet supported")),
-                        }
+                        };
+                        let arc = Arc::new(built);
+                        state.cache().put(cache_key, Arc::clone(&arc));
+                        arc
                     }
                 };
 
                 // List entries at root
-                let handler = ZipHandler::new();
-                let entries = handler.list_entries(&idx, "");
+                let entries: Vec<_> = match archive_type {
+                    ArchiveType::Zip => {
+                        let handler = ZipHandler::new();
+                        handler.list_entries(&idx, "")
+                    }
+                    ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                        let handler = TarHandler::new(archive_type.clone());
+                        handler.list_entries(&idx, "")
+                    }
+                    _ => return Err(anyhow!("Archive type not yet supported")),
+                };
 
                 if long_format {
                     println!("{:<50} {:>12}", "NAME", "SIZE");
@@ -284,6 +298,12 @@ impl Command for LsCommand {
                     return Err(anyhow!("Not a directory"));
                 }
 
+                // Get archive type
+                let archive_type = match archive.as_ref() {
+                    VfsNode::Archive { archive_type, .. } => archive_type.clone(),
+                    _ => return Err(anyhow!("Not an archive")),
+                };
+
                 // Get archive index
                 let idx = match archive.as_ref() {
                     VfsNode::Archive { index: Some(i), .. } => Arc::clone(i),
@@ -301,24 +321,37 @@ impl Command for LsCommand {
                         if let Some(cached) = state.cache().get(&cache_key) {
                             cached
                         } else {
-                            match archive_type {
+                            let built = match archive_type {
                                 ArchiveType::Zip => {
                                     let handler = ZipHandler::new();
-                                    let built = handler.build_index(state.s3_client(), bucket, key).await?;
-                                    let arc = Arc::new(built);
-                                    state.cache().put(cache_key, Arc::clone(&arc));
-                                    arc
+                                    handler.build_index(state.s3_client(), bucket, key).await?
+                                }
+                                ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                                    let handler = TarHandler::new(archive_type.clone());
+                                    handler.build_index(state.s3_client(), bucket, key).await?
                                 }
                                 _ => return Err(anyhow!("Archive type not yet supported")),
-                            }
+                            };
+                            let arc = Arc::new(built);
+                            state.cache().put(cache_key, Arc::clone(&arc));
+                            arc
                         }
                     }
                     _ => return Err(anyhow!("Not an archive")),
                 };
 
                 // List entries at this path
-                let handler = ZipHandler::new();
-                let entries = handler.list_entries(&idx, path);
+                let entries: Vec<_> = match &archive_type {
+                    ArchiveType::Zip => {
+                        let handler = ZipHandler::new();
+                        handler.list_entries(&idx, path)
+                    }
+                    ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                        let handler = TarHandler::new(archive_type.clone());
+                        handler.list_entries(&idx, path)
+                    }
+                    _ => return Err(anyhow!("Archive type not yet supported")),
+                };
 
                 if long_format {
                     println!("{:<50} {:>12}", "NAME", "SIZE");

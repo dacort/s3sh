@@ -1,3 +1,4 @@
+pub mod tar;
 pub mod zip;
 
 use anyhow::Result;
