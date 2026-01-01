@@ -48,9 +48,30 @@ impl ShellState {
         Ok(state)
     }
 
+    /// Create a shell state from components (useful for testing)
+    pub fn from_components(
+        current_node: VfsNode,
+        s3_client: Arc<S3Client>,
+        cache: ArchiveCache,
+        completion_cache: CompletionCache,
+    ) -> Self {
+        ShellState {
+            current_node,
+            s3_client,
+            cache,
+            completion_cache,
+            commands: HashMap::new(),
+        }
+    }
+
     /// Register a command
     fn register_command(&mut self, command: Arc<dyn Command>) {
         self.commands.insert(command.name().to_string(), command);
+    }
+
+    /// Register a command (public for testing)
+    pub fn register_command_pub(&mut self, command: Arc<dyn Command>) {
+        self.register_command(command);
     }
 
     /// Execute a command line

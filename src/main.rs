@@ -1,12 +1,6 @@
-mod archive;
-mod cache;
-mod s3;
-mod shell;
-mod ui;
-mod vfs;
-
 use colored::*;
 use rustyline::error::ReadlineError;
+use s3sh::shell;
 use rustyline::Editor;
 
 #[tokio::main]

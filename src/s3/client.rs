@@ -28,6 +28,15 @@ impl S3Client {
         })
     }
 
+    /// Create an S3Client from an existing AWS SDK client (useful for testing)
+    pub fn from_client(client: Client, region: String) -> Self {
+        S3Client {
+            default_client: client,
+            default_region: region,
+            regional_clients: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
     /// Get or create a client for a specific region
     async fn get_regional_client(&self, region: &str) -> Result<Client> {
         // Check if we already have a client for this region
