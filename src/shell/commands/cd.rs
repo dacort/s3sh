@@ -115,7 +115,10 @@ impl CdCommand {
                 }
             }
 
-            VfsNode::Archive { parent, .. } => Ok(*parent.clone()),
+            VfsNode::Archive { parent, .. } => {
+                // Navigate up from the parent object (not to it, since objects aren't navigable)
+                self.navigate_up(parent)
+            }
 
             VfsNode::ArchiveEntry { archive, path, .. } => {
                 // Go up within the archive

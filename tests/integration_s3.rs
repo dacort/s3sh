@@ -116,15 +116,33 @@ fn create_test_targz() -> Vec<u8> {
         let encoder = GzEncoder::new(&mut archive_data, Compression::default());
         let mut tar = Builder::new(encoder);
 
-        // Add a simple text file to the archive
+        // Add a simple text file to the archive root
         let file_content = b"Content inside archive\n";
         let mut header = tar::Header::new_gnu();
         header.set_path("archive_file.txt").unwrap();
         header.set_size(file_content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-
         tar.append(&header, &file_content[..]).unwrap();
+
+        // Add a directory
+        let mut dir_header = tar::Header::new_gnu();
+        dir_header.set_path("app/").unwrap();
+        dir_header.set_size(0);
+        dir_header.set_mode(0o755);
+        dir_header.set_entry_type(tar::EntryType::Directory);
+        dir_header.set_cksum();
+        tar.append(&dir_header, &[][..]).unwrap();
+
+        // Add a file inside the directory
+        let nested_content = b"Nested file content\n";
+        let mut nested_header = tar::Header::new_gnu();
+        nested_header.set_path("app/nested.txt").unwrap();
+        nested_header.set_size(nested_content.len() as u64);
+        nested_header.set_mode(0o644);
+        nested_header.set_cksum();
+        tar.append(&nested_header, &nested_content[..]).unwrap();
+
         tar.finish().unwrap();
     }
 
@@ -262,5 +280,113 @@ async fn test_cd_into_archive() {
             // Success - we're in the archive
         }
         _ => panic!("Expected to be in archive node after cd into tar.gz"),
+    }
+}
+
+#[tokio::test]
+#[ignore] // Run with: cargo test -- --ignored --test-threads=1
+async fn test_cd_parent_from_archive() {
+    let client = create_localstack_client().await;
+
+    // Verify localstack is running
+    let resp = client.list_buckets().send().await;
+    assert!(resp.is_ok(), "Failed to connect to Localstack S3");
+
+    // Setup test environment
+    setup_test_bucket(&client).await;
+
+    // Create shell state
+    let mut shell = create_test_shell().await;
+
+    // Navigate to bucket
+    let cd_cmd = CdCommand;
+    cd_cmd
+        .execute(&mut shell, &[TEST_BUCKET.to_string()])
+        .await
+        .expect("Failed to cd into bucket");
+
+    // Verify we're in the bucket
+    match shell.current_node() {
+        VfsNode::Bucket { name } => {
+            assert_eq!(name, TEST_BUCKET);
+        }
+        _ => panic!("Expected to be in bucket node"),
+    }
+
+    // Test: cd into tar.gz archive
+    cd_cmd
+        .execute(&mut shell, &["test.tar.gz".to_string()])
+        .await
+        .expect("Failed to cd into test.tar.gz archive");
+
+    // Verify we're in the archive
+    match shell.current_node() {
+        VfsNode::Archive { .. } => {
+            // Success - we're in the archive
+        }
+        _ => panic!("Expected to be in archive node after cd into tar.gz"),
+    }
+
+    // Test: cd .. from archive root should go back to bucket
+    cd_cmd
+        .execute(&mut shell, &["..".to_string()])
+        .await
+        .expect("Failed to cd .. from archive root");
+
+    // Verify we're back in the bucket
+    match shell.current_node() {
+        VfsNode::Bucket { name } => {
+            assert_eq!(name, TEST_BUCKET);
+        }
+        _ => panic!("Expected to be in bucket after cd .. from archive"),
+    }
+
+    // Navigate back into archive and then into a subdirectory
+    cd_cmd
+        .execute(&mut shell, &["test.tar.gz".to_string()])
+        .await
+        .expect("Failed to cd into test.tar.gz archive");
+
+    // cd into app directory within archive
+    cd_cmd
+        .execute(&mut shell, &["app".to_string()])
+        .await
+        .expect("Failed to cd into app directory in archive");
+
+    // Verify we're in the archive entry
+    match shell.current_node() {
+        VfsNode::ArchiveEntry { path, is_dir, .. } => {
+            assert_eq!(path, "app");
+            assert!(is_dir, "Expected app to be a directory");
+        }
+        _ => panic!("Expected to be in archive entry node"),
+    }
+
+    // Test: cd .. from archive subdirectory should go back to archive root
+    cd_cmd
+        .execute(&mut shell, &["..".to_string()])
+        .await
+        .expect("Failed to cd .. from archive subdirectory");
+
+    // Verify we're back at the archive root
+    match shell.current_node() {
+        VfsNode::Archive { .. } => {
+            // Success - we're back at archive root
+        }
+        _ => panic!("Expected to be at archive root after cd .. from subdirectory"),
+    }
+
+    // Test: cd .. again from archive root should go back to bucket
+    cd_cmd
+        .execute(&mut shell, &["..".to_string()])
+        .await
+        .expect("Failed to cd .. from archive root (second time)");
+
+    // Verify we're back in the bucket
+    match shell.current_node() {
+        VfsNode::Bucket { name } => {
+            assert_eq!(name, TEST_BUCKET);
+        }
+        _ => panic!("Expected to be in bucket after cd .. from archive (second time)"),
     }
 }
