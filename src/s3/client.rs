@@ -220,10 +220,10 @@ impl S3Client {
         offset: u64,
         length: u64,
     ) -> Result<Bytes> {
+        let client = self.get_client_for_bucket(bucket).await?;
         let range = format!("bytes={}-{}", offset, offset + length - 1);
 
-        let resp = self
-            .client
+        let resp = client
             .get_object()
             .bucket(bucket)
             .key(key)
