@@ -24,46 +24,9 @@ impl VirtualPath {
         }
     }
 
-    /// Create a new absolute path from segments
-    pub fn from_segments(segments: Vec<String>) -> Self {
-        VirtualPath {
-            segments,
-            is_absolute: true,
-        }
-    }
-
     /// Get the path segments
     pub fn segments(&self) -> &[String] {
         &self.segments
-    }
-
-    /// Check if this is an absolute path
-    pub fn is_absolute(&self) -> bool {
-        self.is_absolute
-    }
-
-    /// Check if this path is empty (root)
-    pub fn is_empty(&self) -> bool {
-        self.segments.is_empty()
-    }
-
-    /// Get the parent path
-    pub fn parent(&self) -> Option<Self> {
-        if self.segments.is_empty() {
-            None
-        } else {
-            let mut parent_segments = self.segments.clone();
-            parent_segments.pop();
-            Some(VirtualPath {
-                segments: parent_segments,
-                is_absolute: self.is_absolute,
-            })
-        }
-    }
-
-    /// Get the last segment (filename)
-    pub fn filename(&self) -> Option<&str> {
-        self.segments.last().map(|s| s.as_str())
     }
 
     /// Join this path with another

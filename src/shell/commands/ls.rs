@@ -545,12 +545,7 @@ impl LsCommand {
             }
             VfsNode::Archive { index, .. } => {
                 if let Some(idx) = index {
-                    // Try both with and without trailing slash (tar archives often include the slash)
-                    let segment_with_slash = format!("{}/", segment);
-                    let entry = idx.entries.get(segment)
-                        .or_else(|| idx.entries.get(&segment_with_slash));
-
-                    if let Some(entry) = entry {
+                    if let Some(entry) = idx.find_entry(segment) {
                         if entry.is_dir {
                             // Store the path without trailing slash for consistency
                             let clean_path = entry.path.trim_end_matches('/').to_string();
@@ -574,12 +569,7 @@ impl LsCommand {
                             format!("{}/{}", path.trim_end_matches('/'), segment)
                         };
 
-                        // Try both with and without trailing slash
-                        let target_path_with_slash = format!("{}/", target_path);
-                        let entry = idx.entries.get(&target_path)
-                            .or_else(|| idx.entries.get(&target_path_with_slash));
-
-                        if let Some(entry) = entry {
+                        if let Some(entry) = idx.find_entry(&target_path) {
                             if entry.is_dir {
                                 // Store the path without trailing slash for consistency
                                 let clean_path = entry.path.trim_end_matches('/').to_string();
@@ -632,7 +622,7 @@ impl LsCommand {
                     }
                     return false;
                 }
-                (Some(n), Some('?')) => {
+                (Some(_n), Some('?')) => {
                     name_chars.next();
                     pattern_chars.next();
                 }

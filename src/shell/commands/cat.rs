@@ -1,13 +1,12 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::Arc;
-use std::time::Duration;
 
 use super::{Command, ShellState};
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
 use crate::archive::ArchiveHandler;
+use crate::ui::create_spinner;
 use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
 
 pub struct CatCommand;
@@ -97,14 +96,8 @@ impl Command for CatCommand {
                         cached
                     } else {
                         // Show spinner while building index
-                        let spinner = ProgressBar::new_spinner();
-                        spinner.set_style(
-                            ProgressStyle::default_spinner()
-                                .template("{spinner:.cyan} {msg}")
-                                .unwrap()
-                        );
-                        spinner.set_message(format!("Building index for {}...", key.split('/').last().unwrap_or(key)));
-                        spinner.enable_steady_tick(Duration::from_millis(100));
+                        let filename = key.split('/').last().unwrap_or(key);
+                        let spinner = create_spinner(&format!("Building index for {}...", filename));
 
                         let built = match archive_type {
                             ArchiveType::Zip => {
@@ -130,14 +123,8 @@ impl Command for CatCommand {
                 };
 
                 // Show spinner while extracting file
-                let spinner = ProgressBar::new_spinner();
-                spinner.set_style(
-                    ProgressStyle::default_spinner()
-                        .template("{spinner:.cyan} {msg}")
-                        .unwrap()
-                );
-                spinner.set_message(format!("Extracting {}...", file_path.split('/').last().unwrap_or(file_path)));
-                spinner.enable_steady_tick(Duration::from_millis(100));
+                let filename = file_path.split('/').last().unwrap_or(file_path);
+                let spinner = create_spinner(&format!("Extracting {}...", filename));
 
                 // Extract the file
                 let bytes = match archive_type {
@@ -246,10 +233,7 @@ impl CatCommand {
                     return Err(anyhow!("Archive index not available"));
                 };
 
-                // Try both with and without trailing slash
-                let path_with_slash = format!("{}/", path);
-                let entry = idx.entries.get(path)
-                    .or_else(|| idx.entries.get(&path_with_slash))
+                let entry = idx.find_entry(path)
                     .ok_or_else(|| anyhow!("File not found in archive: {}", path))?;
 
                 Ok(VfsNode::ArchiveEntry {
@@ -274,10 +258,7 @@ impl CatCommand {
                     format!("{}/{}", current_path.trim_end_matches('/'), path)
                 };
 
-                // Try both with and without trailing slash
-                let full_path_with_slash = format!("{}/", full_path);
-                let entry = idx.entries.get(&full_path)
-                    .or_else(|| idx.entries.get(&full_path_with_slash))
+                let entry = idx.find_entry(&full_path)
                     .ok_or_else(|| anyhow!("File not found in archive: {}", path))?;
 
                 Ok(VfsNode::ArchiveEntry {

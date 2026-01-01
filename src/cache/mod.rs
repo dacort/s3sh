@@ -43,6 +43,11 @@ impl ArchiveCache {
     pub fn len(&self) -> usize {
         self.cache.read().ok().map(|c| c.len()).unwrap_or(0)
     }
+
+    /// Check if cache is empty
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl Clone for ArchiveCache {

@@ -48,6 +48,15 @@ pub struct ArchiveIndex {
     pub entries: std::collections::HashMap<String, ArchiveEntry>,
 }
 
+impl ArchiveIndex {
+    /// Look up an entry, trying both with and without trailing slash
+    /// Tar archives often store directories with trailing slashes
+    pub fn find_entry(&self, path: &str) -> Option<&ArchiveEntry> {
+        self.entries.get(path)
+            .or_else(|| self.entries.get(&format!("{}/", path)))
+    }
+}
+
 /// Represents a node in the virtual filesystem
 /// This is the core abstraction that unifies S3 objects and archive contents
 #[derive(Debug, Clone)]
@@ -97,29 +106,6 @@ pub enum VfsNode {
 }
 
 impl VfsNode {
-    /// Get the display name for this node
-    pub fn display_name(&self) -> String {
-        match self {
-            VfsNode::Root => "/".to_string(),
-            VfsNode::Bucket { name } => name.clone(),
-            VfsNode::Prefix { prefix, .. } => {
-                // Extract just the last segment
-                prefix.trim_end_matches('/').rsplit('/').next()
-                    .unwrap_or(prefix)
-                    .to_string()
-            }
-            VfsNode::Object { key, .. } => {
-                // Extract just the filename
-                key.rsplit('/').next().unwrap_or(key).to_string()
-            }
-            VfsNode::Archive { parent, .. } => parent.display_name(),
-            VfsNode::ArchiveEntry { path, .. } => {
-                // Extract just the filename
-                path.rsplit('/').next().unwrap_or(path).to_string()
-            }
-        }
-    }
-
     /// Check if this node can be listed (like a directory)
     pub fn is_listable(&self) -> bool {
         matches!(
@@ -132,13 +118,5 @@ impl VfsNode {
     /// Check if this node can be navigated into with cd
     pub fn is_navigable(&self) -> bool {
         self.is_listable()
-    }
-
-    /// Check if this node represents a file that can be read
-    pub fn is_readable(&self) -> bool {
-        matches!(
-            self,
-            VfsNode::Object { .. } | VfsNode::ArchiveEntry { is_dir: false, .. }
-        )
     }
 }

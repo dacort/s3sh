@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::cache::ArchiveCache;
 use crate::s3::S3Client;
-use crate::vfs::{PathResolver, VfsNode, VirtualPath};
+use crate::vfs::{VfsNode, VirtualPath};
 use commands::Command;
 
 /// Shell state - tracks current location and provides command execution
@@ -17,8 +17,6 @@ pub struct ShellState {
     s3_client: Arc<S3Client>,
     /// Archive cache
     cache: ArchiveCache,
-    /// Path resolver
-    resolver: PathResolver,
     /// Registered commands
     commands: HashMap<String, Arc<dyn Command>>,
 }
@@ -28,13 +26,11 @@ impl ShellState {
     pub async fn new() -> Result<Self> {
         let s3_client = Arc::new(S3Client::new().await?);
         let cache = ArchiveCache::new(100);
-        let resolver = PathResolver::new();
 
         let mut state = ShellState {
             current_node: VfsNode::Root,
             s3_client,
             cache,
-            resolver,
             commands: HashMap::new(),
         };
 
@@ -111,11 +107,6 @@ impl ShellState {
     /// Get the cache
     pub fn cache(&self) -> &ArchiveCache {
         &self.cache
-    }
-
-    /// Get the resolver
-    pub fn resolver(&self) -> &PathResolver {
-        &self.resolver
     }
 
     /// Get the current virtual path

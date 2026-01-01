@@ -1,14 +1,13 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::Arc;
-use std::time::Duration;
 
 use super::{Command, ShellState};
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
 use crate::archive::ArchiveHandler;
-use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
+use crate::ui::create_spinner;
+use crate::vfs::{ArchiveType, VfsNode};
 
 pub struct CdCommand;
 
@@ -202,12 +201,7 @@ impl CdCommand {
                 // Navigate within archive
                 let index = self.get_or_build_archive_index(state, current).await?;
 
-                // Try both with and without trailing slash (tar archives often include the slash)
-                let segment_with_slash = format!("{}/", segment);
-                let entry = index.entries.get(segment)
-                    .or_else(|| index.entries.get(&segment_with_slash));
-
-                if let Some(entry) = entry {
+                if let Some(entry) = index.find_entry(segment) {
                     if entry.is_dir {
                         // Store the path without trailing slash for consistency
                         let clean_path = entry.path.trim_end_matches('/').to_string();
@@ -234,12 +228,7 @@ impl CdCommand {
                     format!("{}/{}", current_path.trim_end_matches('/'), segment)
                 };
 
-                // Try both with and without trailing slash
-                let target_path_with_slash = format!("{}/", target_path);
-                let entry = index.entries.get(&target_path)
-                    .or_else(|| index.entries.get(&target_path_with_slash));
-
-                if let Some(entry) = entry {
+                if let Some(entry) = index.find_entry(&target_path) {
                     if entry.is_dir {
                         // Store the path without trailing slash for consistency
                         let clean_path = entry.path.trim_end_matches('/').to_string();
@@ -259,178 +248,6 @@ impl CdCommand {
         }
     }
 
-    /// Resolve an absolute path from root
-    async fn resolve_absolute_path(&self, state: &ShellState, path: &str) -> Result<VfsNode> {
-        let vpath = VirtualPath::parse(path);
-        let segments = vpath.segments();
-
-        if segments.is_empty() {
-            return Ok(VfsNode::Root);
-        }
-
-        // First segment is the bucket name
-        let bucket = &segments[0];
-
-        if segments.len() == 1 {
-            // Just the bucket
-            return Ok(VfsNode::Bucket {
-                name: bucket.clone(),
-            });
-        }
-
-        // Check if the path points to an object or prefix
-        let key = segments[1..].join("/");
-
-        // Try to get object metadata
-        if let Ok(metadata) = state.s3_client().head_object(bucket, &key).await {
-            // It's an object - check if it's an archive
-            let obj_node = VfsNode::Object {
-                bucket: bucket.clone(),
-                key: key.clone(),
-                size: metadata.size,
-            };
-            return self.try_archive_node(state, obj_node).await;
-        }
-
-        // Try as a prefix
-        let prefix_key = if key.ends_with('/') {
-            key
-        } else {
-            format!("{}/", key)
-        };
-
-        // Check if there are objects with this prefix
-        let result = state
-            .s3_client()
-            .list_objects(bucket, &prefix_key, Some("/"))
-            .await?;
-
-        if !result.prefixes.is_empty() || !result.objects.is_empty() {
-            Ok(VfsNode::Prefix {
-                bucket: bucket.clone(),
-                prefix: prefix_key,
-            })
-        } else {
-            Err(anyhow!("Path not found: {}", path))
-        }
-    }
-
-    /// Resolve a relative path from current node
-    async fn resolve_relative_path(&self, state: &ShellState, path: &str) -> Result<VfsNode> {
-        let current = state.current_node();
-
-        match current {
-            VfsNode::Root => {
-                // Relative from root is just a bucket name
-                Ok(VfsNode::Bucket {
-                    name: path.to_string(),
-                })
-            }
-
-            VfsNode::Bucket { name } => {
-                // Navigate within bucket
-                let key = path.to_string();
-
-                // Try as object first
-                if let Ok(metadata) = state.s3_client().head_object(name, &key).await {
-                    let obj_node = VfsNode::Object {
-                        bucket: name.clone(),
-                        key: key.clone(),
-                        size: metadata.size,
-                    };
-                    return self.try_archive_node(state, obj_node).await;
-                }
-
-                // Try as prefix
-                let prefix_key = if key.ends_with('/') {
-                    key
-                } else {
-                    format!("{}/", key)
-                };
-
-                Ok(VfsNode::Prefix {
-                    bucket: name.clone(),
-                    prefix: prefix_key,
-                })
-            }
-
-            VfsNode::Prefix { bucket, prefix } => {
-                // Navigate within prefix
-                let full_key = format!("{}{}", prefix, path);
-
-                // Try as object first
-                if let Ok(metadata) = state.s3_client().head_object(bucket, &full_key).await {
-                    let obj_node = VfsNode::Object {
-                        bucket: bucket.clone(),
-                        key: full_key.clone(),
-                        size: metadata.size,
-                    };
-                    return self.try_archive_node(state, obj_node).await;
-                }
-
-                // Try as prefix
-                let prefix_key = if full_key.ends_with('/') {
-                    full_key
-                } else {
-                    format!("{}/", full_key)
-                };
-
-                Ok(VfsNode::Prefix {
-                    bucket: bucket.clone(),
-                    prefix: prefix_key,
-                })
-            }
-
-            VfsNode::Object { .. } => Err(anyhow!("Cannot cd from a file")),
-
-            VfsNode::Archive { .. } => {
-                // Navigate within archive
-                let index = self.get_or_build_archive_index(state, current).await?;
-
-                // Check if path exists in the archive
-                let normalized_path = path.trim_start_matches('/');
-
-                if let Some(entry) = index.entries.get(normalized_path) {
-                    if entry.is_dir {
-                        return Ok(VfsNode::ArchiveEntry {
-                            archive: Box::new(current.clone()),
-                            path: normalized_path.to_string(),
-                            size: entry.size,
-                            is_dir: true,
-                        });
-                    }
-                }
-
-                Err(anyhow!("Path not found in archive: {}", path))
-            }
-
-            VfsNode::ArchiveEntry { archive, path: current_path, .. } => {
-                // Navigate within archive
-                let index = self.get_or_build_archive_index(state, archive).await?;
-
-                // Check if path points to a subdirectory in the archive
-                let target_path = if current_path.is_empty() {
-                    path.to_string()
-                } else {
-                    format!("{}/{}", current_path.trim_end_matches('/'), path)
-                };
-
-                // Check if this path exists in the archive
-                if let Some(entry) = index.entries.get(&target_path) {
-                    if entry.is_dir {
-                        return Ok(VfsNode::ArchiveEntry {
-                            archive: archive.clone(),
-                            path: target_path,
-                            size: entry.size,
-                            is_dir: true,
-                        });
-                    }
-                }
-
-                Err(anyhow!("Path not found in archive: {}", target_path))
-            }
-        }
-    }
 
     /// Check if a node is an archive and convert it to an Archive node
     async fn try_archive_node(&self, state: &ShellState, node: VfsNode) -> Result<VfsNode> {
@@ -439,14 +256,8 @@ impl CdCommand {
                 // Check if this is an archive by extension
                 if let Some(archive_type) = ArchiveType::from_path(key) {
                     // Show spinner while building index
-                    let spinner = ProgressBar::new_spinner();
-                    spinner.set_style(
-                        ProgressStyle::default_spinner()
-                            .template("{spinner:.cyan} {msg}")
-                            .unwrap()
-                    );
-                    spinner.set_message(format!("Building index for {}...", key.split('/').last().unwrap_or(key)));
-                    spinner.enable_steady_tick(Duration::from_millis(100));
+                    let filename = key.split('/').last().unwrap_or(key);
+                    let spinner = create_spinner(&format!("Building index for {}...", filename));
 
                     // Handle different archive types
                     let index = match &archive_type {
@@ -519,14 +330,8 @@ impl CdCommand {
                 }
 
                 // Show spinner while building index
-                let spinner = ProgressBar::new_spinner();
-                spinner.set_style(
-                    ProgressStyle::default_spinner()
-                        .template("{spinner:.cyan} {msg}")
-                        .unwrap()
-                );
-                spinner.set_message(format!("Building index for {}...", key.split('/').last().unwrap_or(key)));
-                spinner.enable_steady_tick(Duration::from_millis(100));
+                let filename = key.split('/').last().unwrap_or(key);
+                let spinner = create_spinner(&format!("Building index for {}...", filename));
 
                 // Build the index
                 let idx = match archive_type {

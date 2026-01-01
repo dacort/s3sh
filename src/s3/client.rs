@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use aws_sdk_s3::Client;
-use aws_sdk_s3::types::Object;
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -184,10 +183,6 @@ impl S3Client {
 
         Ok(ObjectMetadata {
             size: resp.content_length().unwrap_or(0) as u64,
-            content_type: resp.content_type().map(String::from),
-            last_modified: resp.last_modified().and_then(|d| {
-                Some(d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime).ok()?)
-            }),
         })
     }
 
@@ -241,11 +236,6 @@ impl S3Client {
 
         Ok(bytes)
     }
-
-    /// Check if an object exists
-    pub async fn object_exists(&self, bucket: &str, key: &str) -> bool {
-        self.head_object(bucket, key).await.is_ok()
-    }
 }
 
 /// Information about an S3 bucket
@@ -274,6 +264,4 @@ pub struct ObjectInfo {
 #[derive(Debug, Clone)]
 pub struct ObjectMetadata {
     pub size: u64,
-    pub content_type: Option<String>,
-    pub last_modified: Option<String>,
 }
