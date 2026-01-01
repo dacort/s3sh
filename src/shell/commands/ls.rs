@@ -570,16 +570,17 @@ impl LsCommand {
             VfsNode::Archive { index, .. } => {
                 if let Some(idx) = index
                     && let Some(entry) = idx.find_entry(segment)
-                        && entry.is_dir {
-                            // Store the path without trailing slash for consistency
-                            let clean_path = entry.path.trim_end_matches('/').to_string();
-                            return Ok(VfsNode::ArchiveEntry {
-                                archive: Box::new(current.clone()),
-                                path: clean_path,
-                                size: entry.size,
-                                is_dir: true,
-                            });
-                        }
+                    && entry.is_dir
+                {
+                    // Store the path without trailing slash for consistency
+                    let clean_path = entry.path.trim_end_matches('/').to_string();
+                    return Ok(VfsNode::ArchiveEntry {
+                        archive: Box::new(current.clone()),
+                        path: clean_path,
+                        size: entry.size,
+                        is_dir: true,
+                    });
+                }
                 Err(anyhow!("Path not found in archive: {segment}"))
             }
             VfsNode::ArchiveEntry { archive, path, .. } => {
@@ -594,16 +595,17 @@ impl LsCommand {
                     };
 
                     if let Some(entry) = idx.find_entry(&target_path)
-                        && entry.is_dir {
-                            // Store the path without trailing slash for consistency
-                            let clean_path = entry.path.trim_end_matches('/').to_string();
-                            return Ok(VfsNode::ArchiveEntry {
-                                archive: archive.clone(),
-                                path: clean_path,
-                                size: entry.size,
-                                is_dir: true,
-                            });
-                        }
+                        && entry.is_dir
+                    {
+                        // Store the path without trailing slash for consistency
+                        let clean_path = entry.path.trim_end_matches('/').to_string();
+                        return Ok(VfsNode::ArchiveEntry {
+                            archive: archive.clone(),
+                            path: clean_path,
+                            size: entry.size,
+                            is_dir: true,
+                        });
+                    }
                 }
                 Err(anyhow!("Path not found"))
             }

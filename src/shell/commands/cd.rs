@@ -202,16 +202,17 @@ impl CdCommand {
                 let index = self.get_or_build_archive_index(state, current).await?;
 
                 if let Some(entry) = index.find_entry(segment)
-                    && entry.is_dir {
-                        // Store the path without trailing slash for consistency
-                        let clean_path = entry.path.trim_end_matches('/').to_string();
-                        return Ok(VfsNode::ArchiveEntry {
-                            archive: Box::new(current.clone()),
-                            path: clean_path,
-                            size: entry.size,
-                            is_dir: true,
-                        });
-                    }
+                    && entry.is_dir
+                {
+                    // Store the path without trailing slash for consistency
+                    let clean_path = entry.path.trim_end_matches('/').to_string();
+                    return Ok(VfsNode::ArchiveEntry {
+                        archive: Box::new(current.clone()),
+                        path: clean_path,
+                        size: entry.size,
+                        is_dir: true,
+                    });
+                }
 
                 Err(anyhow!("Path not found in archive: {segment}"))
             }
@@ -232,16 +233,17 @@ impl CdCommand {
                 };
 
                 if let Some(entry) = index.find_entry(&target_path)
-                    && entry.is_dir {
-                        // Store the path without trailing slash for consistency
-                        let clean_path = entry.path.trim_end_matches('/').to_string();
-                        return Ok(VfsNode::ArchiveEntry {
-                            archive: archive.clone(),
-                            path: clean_path,
-                            size: entry.size,
-                            is_dir: true,
-                        });
-                    }
+                    && entry.is_dir
+                {
+                    // Store the path without trailing slash for consistency
+                    let clean_path = entry.path.trim_end_matches('/').to_string();
+                    return Ok(VfsNode::ArchiveEntry {
+                        archive: archive.clone(),
+                        path: clean_path,
+                        size: entry.size,
+                        is_dir: true,
+                    });
+                }
 
                 Err(anyhow!("Path not found in archive: {target_path}"))
             }
