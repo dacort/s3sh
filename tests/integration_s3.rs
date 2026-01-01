@@ -123,6 +123,7 @@ fn create_test_targz() -> Vec<u8> {
         header.set_size(file_content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
+
         tar.append(&header, &file_content[..]).unwrap();
 
         // Add a directory
