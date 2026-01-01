@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::collections::HashMap;
@@ -21,46 +21,48 @@ impl ArchiveHandler for ZipHandler {
         key: &str,
     ) -> Result<ArchiveIndex> {
         // Create S3 stream
-        let stream = S3Stream::new(Arc::clone(s3_client), bucket.to_string(), key.to_string()).await?;
+        let stream =
+            S3Stream::new(Arc::clone(s3_client), bucket.to_string(), key.to_string()).await?;
         let reader = stream.into_sync_reader();
 
         // Use spawn_blocking to run sync zip operations in a blocking thread
         // This prevents the "cannot start runtime within runtime" error
-        let entries = tokio::task::spawn_blocking(move || -> Result<HashMap<String, ArchiveEntry>> {
-            // Use the zip crate to read the archive
-            let mut zip = zip::ZipArchive::new(reader)
-                .context("Failed to open zip archive")?;
+        let entries =
+            tokio::task::spawn_blocking(move || -> Result<HashMap<String, ArchiveEntry>> {
+                // Use the zip crate to read the archive
+                let mut zip = zip::ZipArchive::new(reader).context("Failed to open zip archive")?;
 
-            let mut entries = HashMap::new();
+                let mut entries = HashMap::new();
 
-            // Iterate through all files in the zip
-            for i in 0..zip.len() {
-                let file = zip.by_index(i)
-                    .context(format!("Failed to read zip entry {}", i))?;
+                // Iterate through all files in the zip
+                for i in 0..zip.len() {
+                    let file = zip
+                        .by_index(i)
+                        .context(format!("Failed to read zip entry {}", i))?;
 
-                let name = file.name().to_string();
-                let is_dir = file.is_dir();
-                let size = file.size();
+                    let name = file.name().to_string();
+                    let is_dir = file.is_dir();
+                    let size = file.size();
 
-                // Get the offset of this entry
-                // The zip crate doesn't expose offsets directly, but we can work around it
-                // For now, we'll store the index and calculate offsets when extracting
-                entries.insert(
-                    name.clone(),
-                    ArchiveEntry {
-                        path: name,
-                        offset: i as u64, // Store the index, not actual offset
-                        size,
-                        is_dir,
-                    },
-                );
-            }
+                    // Get the offset of this entry
+                    // The zip crate doesn't expose offsets directly, but we can work around it
+                    // For now, we'll store the index and calculate offsets when extracting
+                    entries.insert(
+                        name.clone(),
+                        ArchiveEntry {
+                            path: name,
+                            offset: i as u64, // Store the index, not actual offset
+                            size,
+                            is_dir,
+                        },
+                    );
+                }
 
-            Ok(entries)
-        })
-        .await
-        .context("Failed to join blocking task")?
-        .context("Failed to build zip index")?;
+                Ok(entries)
+            })
+            .await
+            .context("Failed to join blocking task")?
+            .context("Failed to build zip index")?;
 
         Ok(ArchiveIndex { entries })
     }
@@ -84,7 +86,8 @@ impl ArchiveHandler for ZipHandler {
         }
 
         // Create a new stream for extraction
-        let stream = S3Stream::new(Arc::clone(s3_client), bucket.to_string(), key.to_string()).await?;
+        let stream =
+            S3Stream::new(Arc::clone(s3_client), bucket.to_string(), key.to_string()).await?;
         let reader = stream.into_sync_reader();
 
         // Store the index for use in blocking task
@@ -92,11 +95,11 @@ impl ArchiveHandler for ZipHandler {
 
         // Use spawn_blocking to run sync zip operations in a blocking thread
         let buffer = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
-            let mut zip = zip::ZipArchive::new(reader)
-                .context("Failed to open zip archive")?;
+            let mut zip = zip::ZipArchive::new(reader).context("Failed to open zip archive")?;
 
             // Extract by index (stored in offset field)
-            let mut file = zip.by_index(index_num)
+            let mut file = zip
+                .by_index(index_num)
                 .context(format!("Failed to read zip entry at index {}", index_num))?;
 
             // Read the entire file into memory
@@ -113,11 +116,7 @@ impl ArchiveHandler for ZipHandler {
         Ok(Bytes::from(buffer))
     }
 
-    fn list_entries<'a>(
-        &self,
-        index: &'a ArchiveIndex,
-        path: &str,
-    ) -> Vec<&'a ArchiveEntry> {
+    fn list_entries<'a>(&self, index: &'a ArchiveIndex, path: &str) -> Vec<&'a ArchiveEntry> {
         let normalized_path = if path.is_empty() || path == "/" {
             ""
         } else {
@@ -143,7 +142,9 @@ impl ArchiveHandler for ZipHandler {
             let relative = if search_prefix.is_empty() {
                 entry_path.as_str()
             } else {
-                entry_path.strip_prefix(&search_prefix).unwrap_or(entry_path)
+                entry_path
+                    .strip_prefix(&search_prefix)
+                    .unwrap_or(entry_path)
             };
 
             // Skip if empty (shouldn't happen)

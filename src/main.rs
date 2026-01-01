@@ -1,7 +1,7 @@
 use colored::*;
+use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use s3sh::shell;
-use rustyline::Editor;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -18,7 +18,11 @@ async fn main() -> anyhow::Result<()> {
     let mut state = match shell::ShellState::new().await {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("{} Failed to initialize S3 client: {}", "Error:".red().bold(), e);
+            eprintln!(
+                "{} Failed to initialize S3 client: {}",
+                "Error:".red().bold(),
+                e
+            );
             eprintln!("Make sure you have valid AWS credentials configured.");
             std::process::exit(1);
         }

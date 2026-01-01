@@ -1,11 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::sync::Arc;
 
 use super::{Command, ShellState};
+use crate::archive::ArchiveHandler;
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
-use crate::archive::ArchiveHandler;
 use crate::ui::create_spinner;
 use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
 
@@ -97,7 +97,8 @@ impl Command for CatCommand {
                     } else {
                         // Show spinner while building index
                         let filename = key.split('/').last().unwrap_or(key);
-                        let spinner = create_spinner(&format!("Building index for {}...", filename));
+                        let spinner =
+                            create_spinner(&format!("Building index for {}...", filename));
 
                         let built = match archive_type {
                             ArchiveType::Zip => {
@@ -233,7 +234,8 @@ impl CatCommand {
                     return Err(anyhow!("Archive index not available"));
                 };
 
-                let entry = idx.find_entry(path)
+                let entry = idx
+                    .find_entry(path)
                     .ok_or_else(|| anyhow!("File not found in archive: {}", path))?;
 
                 Ok(VfsNode::ArchiveEntry {
@@ -244,7 +246,11 @@ impl CatCommand {
                 })
             }
 
-            VfsNode::ArchiveEntry { archive, path: current_path, .. } => {
+            VfsNode::ArchiveEntry {
+                archive,
+                path: current_path,
+                ..
+            } => {
                 // Resolve file relative to current path in archive
                 let idx = match archive.as_ref() {
                     VfsNode::Archive { index: Some(i), .. } => Arc::clone(i),
@@ -258,7 +264,8 @@ impl CatCommand {
                     format!("{}/{}", current_path.trim_end_matches('/'), path)
                 };
 
-                let entry = idx.find_entry(&full_path)
+                let entry = idx
+                    .find_entry(&full_path)
                     .ok_or_else(|| anyhow!("File not found in archive: {}", path))?;
 
                 Ok(VfsNode::ArchiveEntry {
@@ -269,7 +276,9 @@ impl CatCommand {
                 })
             }
 
-            _ => Err(anyhow!("Cannot resolve relative path from current location")),
+            _ => Err(anyhow!(
+                "Cannot resolve relative path from current location"
+            )),
         }
     }
 }

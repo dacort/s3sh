@@ -7,7 +7,7 @@ use bytes::Bytes;
 use std::sync::Arc;
 
 use crate::s3::S3Client;
-use crate::vfs::{ArchiveIndex, ArchiveEntry};
+use crate::vfs::{ArchiveEntry, ArchiveIndex};
 
 /// Trait for handling different archive formats
 #[async_trait]
@@ -32,9 +32,5 @@ pub trait ArchiveHandler: Send + Sync {
     ) -> Result<Bytes>;
 
     /// List entries at a specific path within the archive
-    fn list_entries<'a>(
-        &self,
-        index: &'a ArchiveIndex,
-        path: &str,
-    ) -> Vec<&'a ArchiveEntry>;
+    fn list_entries<'a>(&self, index: &'a ArchiveIndex, path: &str) -> Vec<&'a ArchiveEntry>;
 }

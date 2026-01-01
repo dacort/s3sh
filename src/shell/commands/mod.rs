@@ -1,9 +1,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-pub mod ls;
-pub mod cd;
 pub mod cat;
+pub mod cd;
+pub mod ls;
 
 use super::ShellState;
 

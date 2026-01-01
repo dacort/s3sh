@@ -1,7 +1,7 @@
 pub mod commands;
 pub mod completion;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::sync::Arc;
 

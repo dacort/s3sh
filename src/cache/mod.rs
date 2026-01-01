@@ -13,7 +13,8 @@ pub struct ArchiveCache {
 impl ArchiveCache {
     /// Create a new archive cache with a maximum number of entries
     pub fn new(capacity: usize) -> Self {
-        let cache = LruCache::new(NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(100).unwrap()));
+        let cache =
+            LruCache::new(NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(100).unwrap()));
         ArchiveCache {
             cache: Arc::new(RwLock::new(cache)),
         }

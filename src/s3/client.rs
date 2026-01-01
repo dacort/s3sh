@@ -16,7 +16,8 @@ impl S3Client {
     /// Create a new S3 client using default AWS configuration
     pub async fn new() -> Result<Self> {
         let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
-        let default_region = config.region()
+        let default_region = config
+            .region()
             .map(|r| r.as_ref().to_string())
             .unwrap_or_else(|| "us-west-2".to_string());
         let client = Client::new(&config);
@@ -48,8 +49,7 @@ impl S3Client {
         }
 
         // Create a new client for this region
-        let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest())
-            .await;
+        let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
         let region_provider = aws_sdk_s3::config::Region::new(region.to_string());
         let s3_config = aws_sdk_s3::config::Builder::from(&config)
             .region(region_provider)
@@ -68,7 +68,13 @@ impl S3Client {
     /// Get the region of a bucket by making a head_bucket request
     async fn get_bucket_region(&self, bucket: &str) -> Result<String> {
         // Try with default client first
-        match self.default_client.head_bucket().bucket(bucket).send().await {
+        match self
+            .default_client
+            .head_bucket()
+            .bucket(bucket)
+            .send()
+            .await
+        {
             Ok(resp) => {
                 // Extract region from response headers
                 if let Some(region) = resp.bucket_region() {
@@ -83,7 +89,13 @@ impl S3Client {
                     // Try to extract region from error
                     // AWS returns the region in the error for redirects
                     // For now, we'll try common regions
-                    for region in ["us-east-1", "us-west-1", "us-west-2", "eu-west-1", "ap-southeast-1"] {
+                    for region in [
+                        "us-east-1",
+                        "us-west-1",
+                        "us-west-2",
+                        "eu-west-1",
+                        "ap-southeast-1",
+                    ] {
                         let client = self.get_regional_client(region).await?;
                         if let Ok(resp) = client.head_bucket().bucket(bucket).send().await {
                             if let Some(bucket_region) = resp.bucket_region() {
@@ -93,7 +105,10 @@ impl S3Client {
                         }
                     }
                 }
-                Err(anyhow::anyhow!("Failed to determine bucket region: {}", bucket))
+                Err(anyhow::anyhow!(
+                    "Failed to determine bucket region: {}",
+                    bucket
+                ))
             }
         }
     }
@@ -101,7 +116,13 @@ impl S3Client {
     /// Get the appropriate client for a bucket (handles cross-region)
     async fn get_client_for_bucket(&self, bucket: &str) -> Result<Client> {
         // Try default client first
-        match self.default_client.head_bucket().bucket(bucket).send().await {
+        match self
+            .default_client
+            .head_bucket()
+            .bucket(bucket)
+            .send()
+            .await
+        {
             Ok(_) => Ok(self.default_client.clone()),
             Err(_) => {
                 // Get the bucket's region and return appropriate client
@@ -126,7 +147,10 @@ impl S3Client {
             .map(|b| BucketInfo {
                 name: b.name().unwrap_or("").to_string(),
                 creation_date: b.creation_date().and_then(|d| {
-                    Some(d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime).ok()?)
+                    Some(
+                        d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime)
+                            .ok()?,
+                    )
                 }),
             })
             .collect();
@@ -171,7 +195,10 @@ impl S3Client {
                 key: obj.key().unwrap_or("").to_string(),
                 size: obj.size().unwrap_or(0) as u64,
                 last_modified: obj.last_modified().and_then(|d| {
-                    Some(d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime).ok()?)
+                    Some(
+                        d.fmt(aws_sdk_s3::primitives::DateTimeFormat::DateTime)
+                            .ok()?,
+                    )
                 }),
             })
             .collect();
@@ -188,7 +215,10 @@ impl S3Client {
             .key(key)
             .send()
             .await
-            .context(format!("Failed to get metadata for s3://{}/{}", bucket, key))?;
+            .context(format!(
+                "Failed to get metadata for s3://{}/{}",
+                bucket, key
+            ))?;
 
         Ok(ObjectMetadata {
             size: resp.content_length().unwrap_or(0) as u64,
@@ -234,7 +264,10 @@ impl S3Client {
             .range(range)
             .send()
             .await
-            .context(format!("Failed to get object range s3://{}/{}", bucket, key))?;
+            .context(format!(
+                "Failed to get object range s3://{}/{}",
+                bucket, key
+            ))?;
 
         let bytes = resp
             .body

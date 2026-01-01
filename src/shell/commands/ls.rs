@@ -1,11 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use colored::*;
 
 use super::{Command, ShellState};
+use crate::archive::ArchiveHandler;
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
-use crate::archive::ArchiveHandler;
 use crate::vfs::{ArchiveType, VfsNode};
 use std::sync::Arc;
 
@@ -94,9 +94,14 @@ impl Command for LsCommand {
 
                     // Print prefixes (directories)
                     for prefix in &result.prefixes {
-                        let display_name = prefix.trim_end_matches('/').rsplit('/').next().unwrap_or(prefix);
+                        let display_name = prefix
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(prefix);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!("{:<50} {:>12} {}",
+                            println!(
+                                "{:<50} {:>12} {}",
                                 format!("{}/", display_name).blue().bold(),
                                 "-",
                                 "-"
@@ -109,7 +114,8 @@ impl Command for LsCommand {
                         let display_name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
                         if Self::should_display(display_name, &filter_pattern) {
                             let modified = obj.last_modified.as_deref().unwrap_or("-");
-                            println!("{:<50} {:>12} {}",
+                            println!(
+                                "{:<50} {:>12} {}",
                                 display_name,
                                 humansize::format_size(obj.size, humansize::BINARY),
                                 modified
@@ -119,7 +125,11 @@ impl Command for LsCommand {
                 } else {
                     // Print prefixes
                     for prefix in &result.prefixes {
-                        let display_name = prefix.trim_end_matches('/').rsplit('/').next().unwrap_or(prefix);
+                        let display_name = prefix
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(prefix);
                         if Self::should_display(display_name, &filter_pattern) {
                             println!("{}/", display_name.blue().bold());
                         }
@@ -150,7 +160,8 @@ impl Command for LsCommand {
                     for p in &result.prefixes {
                         let display_name = p.trim_end_matches('/').rsplit('/').next().unwrap_or(p);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!("{:<50} {:>12} {}",
+                            println!(
+                                "{:<50} {:>12} {}",
                                 format!("{}/", display_name).blue().bold(),
                                 "-",
                                 "-"
@@ -163,7 +174,8 @@ impl Command for LsCommand {
                         let display_name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
                         if Self::should_display(display_name, &filter_pattern) {
                             let modified = obj.last_modified.as_deref().unwrap_or("-");
-                            println!("{:<50} {:>12} {}",
+                            println!(
+                                "{:<50} {:>12} {}",
                                 display_name,
                                 humansize::format_size(obj.size, humansize::BINARY),
                                 modified
@@ -243,7 +255,12 @@ impl Command for LsCommand {
                     println!("{}", "-".repeat(65));
 
                     for entry in entries {
-                        let base_name = entry.path.trim_end_matches('/').rsplit('/').next().unwrap_or(&entry.path);
+                        let base_name = entry
+                            .path
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&entry.path);
                         if !Self::should_display(base_name, &filter_pattern) {
                             continue;
                         }
@@ -268,7 +285,12 @@ impl Command for LsCommand {
                     }
                 } else {
                     for entry in entries {
-                        let base_name = entry.path.trim_end_matches('/').rsplit('/').next().unwrap_or(&entry.path);
+                        let base_name = entry
+                            .path
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&entry.path);
                         if !Self::should_display(base_name, &filter_pattern) {
                             continue;
                         }
@@ -359,7 +381,11 @@ impl Command for LsCommand {
 
                     for entry in entries {
                         let full_path = &entry.path;
-                        let base_name = full_path.trim_end_matches('/').rsplit('/').next().unwrap_or(full_path);
+                        let base_name = full_path
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(full_path);
                         if !Self::should_display(base_name, &filter_pattern) {
                             continue;
                         }
@@ -385,7 +411,11 @@ impl Command for LsCommand {
                 } else {
                     for entry in entries {
                         let full_path = &entry.path;
-                        let base_name = full_path.trim_end_matches('/').rsplit('/').next().unwrap_or(full_path);
+                        let base_name = full_path
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(full_path);
                         if !Self::should_display(base_name, &filter_pattern) {
                             continue;
                         }
@@ -455,11 +485,8 @@ impl LsCommand {
             VfsNode::Bucket { .. } => Ok(VfsNode::Root),
             VfsNode::Prefix { bucket, prefix } => {
                 if prefix.trim_end_matches('/').contains('/') {
-                    let parent_prefix = prefix
-                        .trim_end_matches('/')
-                        .rsplitn(2, '/')
-                        .nth(1)
-                        .unwrap();
+                    let parent_prefix =
+                        prefix.trim_end_matches('/').rsplitn(2, '/').nth(1).unwrap();
                     Ok(VfsNode::Prefix {
                         bucket: bucket.clone(),
                         prefix: format!("{}/", parent_prefix),

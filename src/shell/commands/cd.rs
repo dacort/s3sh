@@ -1,11 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::sync::Arc;
 
 use super::{Command, ShellState};
+use crate::archive::ArchiveHandler;
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
-use crate::archive::ArchiveHandler;
 use crate::ui::create_spinner;
 use crate::vfs::{ArchiveType, VfsNode};
 
@@ -87,11 +87,8 @@ impl CdCommand {
             VfsNode::Prefix { bucket, prefix } => {
                 // Remove the last segment
                 if prefix.trim_end_matches('/').contains('/') {
-                    let parent_prefix = prefix
-                        .trim_end_matches('/')
-                        .rsplitn(2, '/')
-                        .nth(1)
-                        .unwrap();
+                    let parent_prefix =
+                        prefix.trim_end_matches('/').rsplitn(2, '/').nth(1).unwrap();
                     Ok(VfsNode::Prefix {
                         bucket: bucket.clone(),
                         prefix: format!("{}/", parent_prefix),
@@ -221,7 +218,11 @@ impl CdCommand {
                 Err(anyhow!("Path not found in archive: {}", segment))
             }
 
-            VfsNode::ArchiveEntry { archive, path: current_path, .. } => {
+            VfsNode::ArchiveEntry {
+                archive,
+                path: current_path,
+                ..
+            } => {
                 // Navigate within archive
                 let index = self.get_or_build_archive_index(state, archive).await?;
 
@@ -251,7 +252,6 @@ impl CdCommand {
             VfsNode::Object { .. } => Err(anyhow!("Cannot cd from a file")),
         }
     }
-
 
     /// Check if a node is an archive and convert it to an Archive node
     async fn try_archive_node(&self, state: &ShellState, node: VfsNode) -> Result<VfsNode> {
@@ -401,13 +401,13 @@ impl CdCommand {
 
             VfsNode::Prefix { bucket, prefix } => {
                 // List prefixes and objects at this prefix
-                if let Ok(result) = state.s3_client().list_objects(bucket, prefix, Some("/")).await {
+                if let Ok(result) = state
+                    .s3_client()
+                    .list_objects(bucket, prefix, Some("/"))
+                    .await
+                {
                     for pfx in result.prefixes {
-                        let name = pfx
-                            .trim_end_matches('/')
-                            .rsplit('/')
-                            .next()
-                            .unwrap_or(&pfx);
+                        let name = pfx.trim_end_matches('/').rsplit('/').next().unwrap_or(&pfx);
                         entries.push(name.to_string());
                     }
                     for obj in result.objects {
@@ -462,7 +462,10 @@ impl CdCommand {
 
             VfsNode::ArchiveEntry { archive, path, .. } => {
                 // Get the archive index from parent
-                let idx = if let VfsNode::Archive { index: Some(idx), .. } = &**archive {
+                let idx = if let VfsNode::Archive {
+                    index: Some(idx), ..
+                } = &**archive
+                {
                     idx.clone()
                 } else {
                     return Ok(entries);

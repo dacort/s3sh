@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use s3sh::cache::ArchiveCache;
 use s3sh::s3::S3Client;
-use s3sh::shell::commands::{cat::CatCommand, cd::CdCommand, Command};
+use s3sh::shell::commands::{Command, cat::CatCommand, cd::CdCommand};
 use s3sh::shell::{CompletionCache, ShellState};
 use s3sh::vfs::VfsNode;
 
@@ -14,8 +14,8 @@ const TEST_BUCKET: &str = "test-bucket";
 
 /// Helper function to create an S3 client pointing to localstack
 async fn create_localstack_client() -> Client {
-    let endpoint_url = std::env::var("AWS_ENDPOINT_URL")
-        .unwrap_or_else(|_| "http://localhost:4566".to_string());
+    let endpoint_url =
+        std::env::var("AWS_ENDPOINT_URL").unwrap_or_else(|_| "http://localhost:4566".to_string());
 
     let config = aws_config::defaults(BehaviorVersion::latest())
         .region("us-east-1")
@@ -33,8 +33,8 @@ async fn create_localstack_client() -> Client {
 
 /// Helper function to create a test ShellState with localstack
 async fn create_test_shell() -> ShellState {
-    let endpoint_url = std::env::var("AWS_ENDPOINT_URL")
-        .unwrap_or_else(|_| "http://localhost:4566".to_string());
+    let endpoint_url =
+        std::env::var("AWS_ENDPOINT_URL").unwrap_or_else(|_| "http://localhost:4566".to_string());
 
     let config = aws_config::defaults(BehaviorVersion::latest())
         .region("us-east-1")
@@ -52,12 +52,7 @@ async fn create_test_shell() -> ShellState {
     let cache = ArchiveCache::new(100);
     let completion_cache = CompletionCache::new(Arc::clone(&s3_client));
 
-    let mut state = ShellState::from_components(
-        VfsNode::Root,
-        s3_client,
-        cache,
-        completion_cache,
-    );
+    let mut state = ShellState::from_components(VfsNode::Root, s3_client, cache, completion_cache);
 
     // Register commands
     state.register_command_pub(Arc::new(CdCommand));
@@ -112,8 +107,8 @@ async fn setup_test_bucket(client: &Client) {
 
 /// Create a simple tar.gz archive with test files
 fn create_test_targz() -> Vec<u8> {
-    use flate2::write::GzEncoder;
     use flate2::Compression;
+    use flate2::write::GzEncoder;
     use tar::Builder;
 
     let mut archive_data = Vec::new();
@@ -143,7 +138,10 @@ async fn test_cd_command() {
 
     // Verify localstack is running
     let resp = client.list_buckets().send().await;
-    assert!(resp.is_ok(), "Failed to connect to Localstack S3. Is it running on localhost:4566?");
+    assert!(
+        resp.is_ok(),
+        "Failed to connect to Localstack S3. Is it running on localhost:4566?"
+    );
 
     // Setup test environment
     setup_test_bucket(&client).await;
@@ -222,12 +220,12 @@ async fn test_cat_command() {
 
     // Test: cat a nested file with absolute path
     let result = cat_cmd
-        .execute(
-            &mut shell,
-            &[format!("/{}/dir/nested.txt", TEST_BUCKET)],
-        )
+        .execute(&mut shell, &[format!("/{}/dir/nested.txt", TEST_BUCKET)])
         .await;
-    assert!(result.is_ok(), "Failed to cat nested file with absolute path");
+    assert!(
+        result.is_ok(),
+        "Failed to cat nested file with absolute path"
+    );
 }
 
 #[tokio::test]
@@ -253,7 +251,9 @@ async fn test_cd_into_archive() {
         .expect("Failed to cd into bucket");
 
     // Test: cd into tar.gz archive
-    let result = cd_cmd.execute(&mut shell, &["test.tar.gz".to_string()]).await;
+    let result = cd_cmd
+        .execute(&mut shell, &["test.tar.gz".to_string()])
+        .await;
     assert!(result.is_ok(), "Failed to cd into test.tar.gz archive");
 
     // Verify we're in the archive
