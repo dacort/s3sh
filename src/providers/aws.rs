@@ -4,6 +4,12 @@ use anyhow::Result;
 /// AWS S3 provider (default)
 pub struct AwsProvider;
 
+impl Default for AwsProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AwsProvider {
     pub fn new() -> Self {
         Self

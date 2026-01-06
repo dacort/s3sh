@@ -93,8 +93,7 @@ impl ProviderRegistry {
 
     /// Register a provider
     pub fn register(&mut self, provider: Box<dyn Provider>) {
-        self.providers
-            .insert(provider.name().to_string(), provider);
+        self.providers.insert(provider.name().to_string(), provider);
     }
 
     /// Get a provider by name

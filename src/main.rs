@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use colored::*;
-use rustyline::error::ReadlineError;
 use rustyline::Editor;
+use rustyline::error::ReadlineError;
 use std::sync::Arc;
 
 use s3sh::{providers, s3, shell};

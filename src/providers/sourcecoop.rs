@@ -4,6 +4,12 @@ use anyhow::Result;
 /// Source Cooperative provider for public geospatial data
 pub struct SourceCoopProvider;
 
+impl Default for SourceCoopProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SourceCoopProvider {
     pub fn new() -> Self {
         Self
