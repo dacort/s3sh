@@ -168,8 +168,7 @@ mod tests {
         let result = create_s3_client(config).await;
         assert!(result.is_ok());
 
-        let (client, region, disable_cross_region) = result.unwrap();
-        assert!(std::ptr::addr_of!(client) as usize != 0); // Client should be created
+        let (_client, region, disable_cross_region) = result.unwrap();
         assert_eq!(region, "us-east-1");
         assert_eq!(disable_cross_region, false);
     }
@@ -308,11 +307,10 @@ mod tests {
 
         // Get list and verify it's sorted
         let providers = registry.list();
-        let sorted_providers: Vec<&str> = providers.clone();
 
         // Check that providers are in alphabetical order
-        for i in 1..sorted_providers.len() {
-            assert!(sorted_providers[i - 1] <= sorted_providers[i]);
+        for i in 1..providers.len() {
+            assert!(providers[i - 1] <= providers[i]);
         }
 
         // Verify specific providers are included
