@@ -10,6 +10,8 @@ pub struct S3Client {
     default_region: String,
     /// Cache of region-specific clients
     regional_clients: Arc<RwLock<HashMap<String, Client>>>,
+    /// Disable cross-region bucket support (for custom endpoints)
+    disable_cross_region: bool,
 }
 
 impl S3Client {
@@ -26,15 +28,26 @@ impl S3Client {
             default_client: client,
             default_region,
             regional_clients: Arc::new(RwLock::new(HashMap::new())),
+            disable_cross_region: false,
         })
     }
 
     /// Create an S3Client from an existing AWS SDK client (useful for testing)
     pub fn from_client(client: Client, region: String) -> Self {
+        Self::from_client_with_options(client, region, false)
+    }
+
+    /// Create an S3Client with custom options (for providers with custom endpoints)
+    pub fn from_client_with_options(
+        client: Client,
+        region: String,
+        disable_cross_region: bool,
+    ) -> Self {
         S3Client {
             default_client: client,
             default_region: region,
             regional_clients: Arc::new(RwLock::new(HashMap::new())),
+            disable_cross_region,
         }
     }
 
@@ -114,6 +127,11 @@ impl S3Client {
 
     /// Get the appropriate client for a bucket (handles cross-region)
     async fn get_client_for_bucket(&self, bucket: &str) -> Result<Client> {
+        // If cross-region is disabled (e.g., custom endpoints), always use default client
+        if self.disable_cross_region {
+            return Ok(self.default_client.clone());
+        }
+
         // Try default client first
         match self
             .default_client

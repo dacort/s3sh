@@ -1,35 +1,84 @@
+use anyhow::Result;
+use clap::Parser;
 use colored::*;
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
-use s3sh::shell;
+use std::sync::Arc;
+
+use s3sh::{providers, s3, shell};
+
+#[derive(Parser, Debug)]
+#[command(name = "s3sh")]
+#[command(about = "The S3 Shell - Navigate S3 buckets like a Unix shell", long_about = None)]
+struct Args {
+    /// S3 provider to use (aws, sourcecoop)
+    #[arg(short, long, default_value = "aws")]
+    provider: String,
+
+    /// List available providers and exit
+    #[arg(long)]
+    list_providers: bool,
+}
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Print welcome message
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // Handle --list-providers
+    if args.list_providers {
+        print_available_providers();
+        return Ok(());
+    }
+
+    // Initialize provider registry
+    let registry = providers::ProviderRegistry::new();
+
+    // Get the requested provider
+    let provider = registry
+        .get(&args.provider)
+        .ok_or_else(|| anyhow::anyhow!("Unknown provider: {}", args.provider))?;
+
+    // Print welcome message with provider info
     println!("{}", "=".repeat(60).cyan());
     println!("{}", "  s3sh - The S3 Shell".bold().cyan());
     println!("{}", "  Navigate S3 buckets like a Unix shell".cyan());
     println!("{}", "=".repeat(60).cyan());
+    println!(
+        "Provider: {} ({})",
+        provider.name().bold(),
+        provider.description()
+    );
     println!();
     println!("Type 'help' for available commands or 'exit' to quit");
     println!();
 
-    // Initialize shell state
-    let mut state = match shell::ShellState::new().await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!(
-                "{} Failed to initialize S3 client: {}",
-                "Error:".red().bold(),
-                e
-            );
-            eprintln!("Make sure you have valid AWS credentials configured.");
-            std::process::exit(1);
-        }
-    };
+    // Create S3 client from provider
+    let provider_config = provider.build_config().await?;
+    let (client, region, disable_cross_region) =
+        match providers::create_s3_client(provider_config).await {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!(
+                    "{} Failed to initialize S3 client: {}",
+                    "Error:".red().bold(),
+                    e
+                );
+                if args.provider == "aws" {
+                    eprintln!("Make sure you have valid AWS credentials configured.");
+                }
+                std::process::exit(1);
+            }
+        };
 
-    // Don't pre-populate cache - let lazy loader fetch with accurate metadata
-    // This ensures command-aware filtering (cd shows only dirs, cat shows all)
+    // Wrap client in S3Client wrapper
+    let s3_client = Arc::new(s3::S3Client::from_client_with_options(
+        client,
+        region,
+        disable_cross_region,
+    ));
+
+    // Initialize shell state with the client
+    let mut state = shell::ShellState::with_client(s3_client).await?;
 
     // Create readline editor with tab completion
     let completer = shell::ShellCompleter::new(state.completion_cache().clone());
@@ -52,10 +101,8 @@ async fn main() -> anyhow::Result<()> {
 
         match rl.readline(&prompt) {
             Ok(line) => {
-                // Add to history
                 let _ = rl.add_history_entry(line.as_str());
 
-                // Execute command
                 match state.execute(&line).await {
                     Ok(_) => {}
                     Err(e) => {
@@ -67,12 +114,10 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                // Ctrl-C
                 println!("^C");
                 continue;
             }
             Err(ReadlineError::Eof) => {
-                // Ctrl-D
                 println!("exit");
                 break;
             }
@@ -90,4 +135,19 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Goodbye!");
     Ok(())
+}
+
+fn print_available_providers() {
+    let registry = providers::ProviderRegistry::new();
+    println!("Available S3 providers:");
+    println!();
+
+    for name in registry.list() {
+        if let Some(provider) = registry.get(name) {
+            println!("  {:12} - {}", name.cyan(), provider.description());
+        }
+    }
+
+    println!();
+    println!("Usage: s3sh --provider <name>");
 }

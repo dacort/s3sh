@@ -29,6 +29,11 @@ impl ShellState {
     /// Create a new shell state
     pub async fn new() -> Result<Self> {
         let s3_client = Arc::new(S3Client::new().await?);
+        Self::with_client(s3_client).await
+    }
+
+    /// Create shell state with a specific S3 client (for provider support)
+    pub async fn with_client(s3_client: Arc<S3Client>) -> Result<Self> {
         let cache = ArchiveCache::new(100);
         let completion_cache = CompletionCache::new(Arc::clone(&s3_client));
 

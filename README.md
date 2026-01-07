@@ -1,9 +1,10 @@
 # s3sh - The S3 Shell
 
 ## Overview
-s3sh is an interactive S3 shell for exploring Amazon S3 buckets with Unix-like commands. Navigate S3 buckets and prefixes like directories, and seamlessly explore archive contents (tar, tar.gz, tar.bz2, zip) without downloading entire files.
+s3sh is an interactive S3 shell for exploring S3-compatible storage with Unix-like commands. Navigate S3 buckets and prefixes like directories, and seamlessly explore archive contents (tar, tar.gz, tar.bz2, zip) without downloading entire files. Supports multiple providers including AWS S3 and Source Cooperative for accessing public geospatial data.
 
 ## Key Features
+- **Multi-Provider Support** - Access AWS S3, Source Coop, and other S3-compatible storage services
 - **Unix-like Commands** - Use familiar `ls`, `cd`, `cat`, `pwd` commands to navigate S3
 - **Archive Navigation** - `cd` directly into tar/zip files and explore their contents
 - **Efficient Streaming** - Uses S3 range requests to access archive contents without full downloads
@@ -28,6 +29,56 @@ Launch the interactive shell:
 ```bash
 s3sh
 ```
+
+### Providers
+
+s3sh supports multiple S3-compatible storage providers through a plugin system. Use the `--provider` flag to select a provider:
+
+```bash
+# Use AWS S3 (default)
+s3sh
+
+# Use Source Coop for public geospatial data
+s3sh --provider sourcecoop
+
+# List available providers
+s3sh --list-providers
+```
+
+#### AWS Provider (default)
+
+Standard AWS S3 access with full cross-region support. Requires AWS credentials.
+
+```bash
+s3sh
+# or explicitly
+s3sh --provider aws
+```
+
+#### Source Coop Provider
+
+Access public geospatial datasets from [Source Cooperative](https://source.coop) without credentials:
+
+```bash
+s3sh --provider sourcecoop
+
+s3sh:/ $ cd kerner-lab/fields-of-the-world
+s3sh:/kerner-lab/fields-of-the-world $ ls
+cambodia/
+croatia/
+denmark/
+...
+README.md
+ftw-sources.pmtiles
+
+s3sh:/kerner-lab/fields-of-the-world $ cat README.md
+```
+
+Available Source Coop datasets include:
+- **cholera** - Historical cholera data
+- **kerner-lab** - Fields of the World agricultural field boundaries
+- **gistemp** - NASA GISS Surface Temperature Analysis
+- And many more public geospatial datasets
 
 ### Basic Commands
 
@@ -93,9 +144,11 @@ logs/  data.json  config.yml  # Files and directories
 - **Bzip2 Tar** - `.tar.bz2`, `.tbz2`
 - **Zip** - `.zip`
 
-## AWS Credentials
+## Authentication
 
-s3sh uses the AWS SDK for Rust and respects standard AWS credential configuration:
+### AWS Provider
+
+The AWS provider uses the AWS SDK for Rust and respects standard AWS credential configuration:
 - Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
 - AWS credentials file (`~/.aws/credentials`)
 - IAM instance profile (when running on EC2)
@@ -117,6 +170,10 @@ Required IAM permissions:
   ]
 }
 ```
+
+### Source Coop Provider
+
+No authentication required. The Source Coop provider accesses public datasets anonymously.
 
 ## Technical Details
 
