@@ -114,3 +114,222 @@ impl Default for ProviderRegistry {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Mock provider for testing
+    struct MockProvider {
+        name: String,
+        description: String,
+    }
+
+    impl MockProvider {
+        fn new(name: &str, description: &str) -> Self {
+            Self {
+                name: name.to_string(),
+                description: description.to_string(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for MockProvider {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn description(&self) -> &str {
+            &self.description
+        }
+
+        async fn build_config(&self) -> Result<ProviderConfig> {
+            Ok(ProviderConfig {
+                endpoint_url: None,
+                force_path_style: false,
+                anonymous: false,
+                default_region: None,
+                disable_cross_region: false,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_s3_client_default() {
+        let config = ProviderConfig {
+            endpoint_url: None,
+            force_path_style: false,
+            anonymous: false,
+            default_region: Some("us-east-1".to_string()),
+            disable_cross_region: false,
+        };
+
+        let result = create_s3_client(config).await;
+        assert!(result.is_ok());
+
+        let (client, region, disable_cross_region) = result.unwrap();
+        assert!(std::ptr::addr_of!(client) as usize != 0); // Client should be created
+        assert_eq!(region, "us-east-1");
+        assert_eq!(disable_cross_region, false);
+    }
+
+    #[tokio::test]
+    async fn test_create_s3_client_anonymous() {
+        let config = ProviderConfig {
+            endpoint_url: None,
+            force_path_style: false,
+            anonymous: true,
+            default_region: Some("us-west-2".to_string()),
+            disable_cross_region: false,
+        };
+
+        let result = create_s3_client(config).await;
+        assert!(result.is_ok());
+
+        let (_, region, disable_cross_region) = result.unwrap();
+        assert_eq!(region, "us-west-2");
+        assert_eq!(disable_cross_region, false);
+    }
+
+    #[tokio::test]
+    async fn test_create_s3_client_custom_endpoint() {
+        let config = ProviderConfig {
+            endpoint_url: Some("https://s3.custom.com".to_string()),
+            force_path_style: false,
+            anonymous: false,
+            default_region: Some("custom-region".to_string()),
+            disable_cross_region: false,
+        };
+
+        let result = create_s3_client(config).await;
+        assert!(result.is_ok());
+
+        let (_, region, _) = result.unwrap();
+        assert_eq!(region, "custom-region");
+    }
+
+    #[tokio::test]
+    async fn test_create_s3_client_force_path_style() {
+        let config = ProviderConfig {
+            endpoint_url: Some("https://s3.custom.com".to_string()),
+            force_path_style: true,
+            anonymous: true,
+            default_region: Some("us-west-2".to_string()),
+            disable_cross_region: true,
+        };
+
+        let result = create_s3_client(config).await;
+        assert!(result.is_ok());
+
+        let (_, region, disable_cross_region) = result.unwrap();
+        assert_eq!(region, "us-west-2");
+        assert_eq!(disable_cross_region, true);
+    }
+
+    #[tokio::test]
+    async fn test_create_s3_client_default_region_fallback() {
+        let config = ProviderConfig {
+            endpoint_url: None,
+            force_path_style: false,
+            anonymous: false,
+            default_region: None, // No default region set
+            disable_cross_region: false,
+        };
+
+        let result = create_s3_client(config).await;
+        assert!(result.is_ok());
+
+        let (_, region, _) = result.unwrap();
+        // Should fall back to us-west-2 if no region is configured
+        assert!(!region.is_empty());
+    }
+
+    #[test]
+    fn test_provider_registry_new() {
+        let registry = ProviderRegistry::new();
+
+        // Verify built-in providers are registered
+        assert!(registry.get("aws").is_some());
+        assert!(registry.get("sourcecoop").is_some());
+
+        // Verify list contains both providers
+        let providers = registry.list();
+        assert_eq!(providers.len(), 2);
+        assert!(providers.contains(&"aws"));
+        assert!(providers.contains(&"sourcecoop"));
+    }
+
+    #[test]
+    fn test_provider_registry_register() {
+        let mut registry = ProviderRegistry::new();
+        let initial_count = registry.list().len();
+
+        // Register a custom provider
+        let custom_provider = Box::new(MockProvider::new("custom", "Custom S3 Provider"));
+        registry.register(custom_provider);
+
+        // Verify provider was registered
+        assert!(registry.get("custom").is_some());
+        assert_eq!(registry.list().len(), initial_count + 1);
+    }
+
+    #[test]
+    fn test_provider_registry_get_existing() {
+        let registry = ProviderRegistry::new();
+
+        // Test getting existing providers
+        let aws_provider = registry.get("aws");
+        assert!(aws_provider.is_some());
+        assert_eq!(aws_provider.unwrap().name(), "aws");
+
+        let sourcecoop_provider = registry.get("sourcecoop");
+        assert!(sourcecoop_provider.is_some());
+        assert_eq!(sourcecoop_provider.unwrap().name(), "sourcecoop");
+    }
+
+    #[test]
+    fn test_provider_registry_get_non_existing() {
+        let registry = ProviderRegistry::new();
+
+        // Test getting non-existing provider
+        let non_existing = registry.get("nonexistent");
+        assert!(non_existing.is_none());
+    }
+
+    #[test]
+    fn test_provider_registry_list_sorted() {
+        let mut registry = ProviderRegistry::new();
+
+        // Register providers in non-alphabetical order
+        registry.register(Box::new(MockProvider::new("zebra", "Zebra Provider")));
+        registry.register(Box::new(MockProvider::new("alpha", "Alpha Provider")));
+        registry.register(Box::new(MockProvider::new("beta", "Beta Provider")));
+
+        // Get list and verify it's sorted
+        let providers = registry.list();
+        let sorted_providers: Vec<&str> = providers.clone();
+
+        // Check that providers are in alphabetical order
+        for i in 1..sorted_providers.len() {
+            assert!(sorted_providers[i - 1] <= sorted_providers[i]);
+        }
+
+        // Verify specific providers are included
+        assert!(providers.contains(&"alpha"));
+        assert!(providers.contains(&"aws"));
+        assert!(providers.contains(&"beta"));
+        assert!(providers.contains(&"sourcecoop"));
+        assert!(providers.contains(&"zebra"));
+    }
+
+    #[test]
+    fn test_provider_registry_default() {
+        let registry = ProviderRegistry::default();
+
+        // Default should behave the same as new()
+        assert!(registry.get("aws").is_some());
+        assert!(registry.get("sourcecoop").is_some());
+        assert_eq!(registry.list().len(), 2);
+    }
+}
