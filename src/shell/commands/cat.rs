@@ -6,6 +6,8 @@ use super::{Command, ShellState};
 use crate::archive::ArchiveHandler;
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
+#[cfg(feature = "parquet")]
+use crate::archive::ParquetHandler;
 use crate::ui::create_spinner;
 use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
 
@@ -108,6 +110,11 @@ impl Command for CatCommand {
                                 let handler = TarHandler::new(archive_type.clone());
                                 handler.build_index(state.s3_client(), bucket, key).await?
                             }
+                            #[cfg(feature = "parquet")]
+                            ArchiveType::Parquet => {
+                                let handler = ParquetHandler::new();
+                                handler.build_index(state.s3_client(), bucket, key).await?
+                            }
                             _ => {
                                 spinner.finish_and_clear();
                                 return Err(anyhow!("Archive type not yet supported"));
@@ -136,6 +143,13 @@ impl Command for CatCommand {
                     }
                     ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
                         let handler = TarHandler::new(archive_type.clone());
+                        handler
+                            .extract_file(state.s3_client(), bucket, key, &idx, file_path)
+                            .await?
+                    }
+                    #[cfg(feature = "parquet")]
+                    ArchiveType::Parquet => {
+                        let handler = ParquetHandler::new();
                         handler
                             .extract_file(state.s3_client(), bucket, key, &idx, file_path)
                             .await?

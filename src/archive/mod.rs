@@ -1,6 +1,9 @@
 pub mod tar;
 pub mod zip;
 
+#[cfg(feature = "parquet")]
+pub mod parquet;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -34,3 +37,6 @@ pub trait ArchiveHandler: Send + Sync {
     /// List entries at a specific path within the archive
     fn list_entries<'a>(&self, index: &'a ArchiveIndex, path: &str) -> Vec<&'a ArchiveEntry>;
 }
+
+#[cfg(feature = "parquet")]
+pub use parquet::ParquetHandler;

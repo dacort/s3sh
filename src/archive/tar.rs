@@ -73,12 +73,7 @@ impl ArchiveHandler for TarHandler {
 
                     entries.insert(
                         path.clone(),
-                        ArchiveEntry {
-                            path,
-                            offset,
-                            size,
-                            is_dir,
-                        },
+                        ArchiveEntry::physical(path, offset, size, is_dir),
                     );
 
                     // Update offset for next entry (512-byte aligned)
@@ -95,7 +90,10 @@ impl ArchiveHandler for TarHandler {
             .context("Failed to join blocking task")?
             .context("Failed to build tar index")?;
 
-        Ok(ArchiveIndex { entries })
+        Ok(ArchiveIndex {
+            entries,
+            metadata: std::collections::HashMap::new(),
+        })
     }
 
     async fn extract_file(
@@ -123,7 +121,10 @@ impl ArchiveHandler for TarHandler {
         // Store information needed for extraction
         let target_path = file_path.to_string();
         let archive_type = self.archive_type.clone();
-        let entry_offset = entry.offset;
+        let entry_offset = match &entry.entry_type {
+            crate::vfs::EntryType::Physical { offset } => *offset,
+            _ => return Err(anyhow!("Invalid entry type for tar handler")),
+        };
 
         // Use spawn_blocking for sync tar operations
         let buffer = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
