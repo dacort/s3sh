@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/dacort/s3sh/compare/v0.1.1...v0.1.2) - 2026-01-07
+
+### Other
+
+- Add archive file auto-completion for cd command
+- Add design docs to the repo :)
+- Merge pull request #6 from dacort/copilot/sub-pr-5
+- Address code review feedback: remove ineffective assertion and redundant variable
+- Add comprehensive tests for create_s3_client and ProviderRegistry
+- cargo clippy && fmt
+- cargo clippy && fmt
+- Add readme details about new provider system
+- Add provider support, with source coop as the first example
+
 ## [0.1.1](https://github.com/dacort/s3sh/compare/v0.1.0...v0.1.1) - 2026-01-02
 
 ### Other
