@@ -93,7 +93,6 @@ impl ArchiveHandler for ZipHandler {
         // Store the index for use in blocking task
         let index_num = match &entry.entry_type {
             crate::vfs::EntryType::Physical { offset } => *offset as usize,
-            _ => return Err(anyhow!("Invalid entry type for zip handler")),
         };
 
         // Use spawn_blocking to run sync zip operations in a blocking thread

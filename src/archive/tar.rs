@@ -125,7 +125,6 @@ impl ArchiveHandler for TarHandler {
         let archive_type = self.archive_type.clone();
         let entry_offset = match &entry.entry_type {
             crate::vfs::EntryType::Physical { offset } => *offset,
-            _ => return Err(anyhow!("Invalid entry type for tar handler")),
         };
 
         // Use spawn_blocking for sync tar operations
