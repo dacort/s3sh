@@ -192,7 +192,7 @@ impl ParquetHandler {
             ArchiveEntry::parquet_virtual(
                 "_schema.txt".to_string(),
                 estimated_size as u64,
-                false, // is_file
+                false, // is_dir
                 ParquetEntryHandler::Schema,
             ),
         );
@@ -223,7 +223,7 @@ impl ParquetHandler {
                 ArchiveEntry::parquet_virtual(
                     path,
                     estimated_size as u64,
-                    false, // is_file
+                    false, // is_dir
                     ParquetEntryHandler::ColumnData {
                         column_index: i,
                         column_name: column_name.to_string(),
@@ -257,7 +257,7 @@ impl ParquetHandler {
                 ArchiveEntry::parquet_virtual(
                     path,
                     estimated_size,
-                    false, // is_file
+                    false, // is_dir
                     ParquetEntryHandler::ColumnStats {
                         column_index: i,
                         column_name: column_name.to_string(),
@@ -521,7 +521,6 @@ impl ParquetHandler {
         let store = Self::create_object_store(&config, bucket).await?;
         let object_path = ObjectPath::from(key);
 
-        // Get object metadata
         // Create Parquet reader with path (API changed in 57.x)
         let reader = ParquetObjectReader::new(store, object_path);
 
