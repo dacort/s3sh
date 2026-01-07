@@ -4,13 +4,21 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::s3::S3Client;
-use crate::vfs::VfsNode;
+use crate::vfs::{ArchiveType, VfsNode};
 
 /// Entry in completion cache with metadata
 #[derive(Clone, Debug)]
 pub struct CompletionEntry {
     pub name: String,
     pub is_dir: bool,
+}
+
+impl CompletionEntry {
+    /// Check if this entry can be navigated into with cd
+    /// Returns true for directories and supported archive files
+    pub fn is_navigable(&self) -> bool {
+        self.is_dir || ArchiveType::from_path(&self.name).is_some()
+    }
 }
 
 /// Cache of available completions for different paths
@@ -149,8 +157,8 @@ impl ShellCompleter {
                 if !entry.name.starts_with(file_prefix) {
                     return false;
                 }
-                // Filter by command: cd only shows directories
-                if command == "cd" && !entry.is_dir {
+                // Filter by command: cd only shows directories and archives
+                if command == "cd" && !entry.is_navigable() {
                     return false;
                 }
                 true
@@ -467,8 +475,8 @@ impl Completer for ShellCompleter {
             let completions = entries
                 .into_iter()
                 .filter(|entry| {
-                    // Filter by command: cd only shows directories
-                    if command == "cd" && !entry.is_dir {
+                    // Filter by command: cd only shows directories and archives
+                    if command == "cd" && !entry.is_navigable() {
                         return false;
                     }
                     true
