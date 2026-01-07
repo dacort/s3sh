@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use super::{Command, ShellState};
 use crate::archive::ArchiveHandler;
-use crate::archive::tar::TarHandler;
-use crate::archive::zip::ZipHandler;
 #[cfg(feature = "parquet")]
 use crate::archive::ParquetHandler;
+use crate::archive::tar::TarHandler;
+use crate::archive::zip::ZipHandler;
 use crate::ui::create_spinner;
 use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
 

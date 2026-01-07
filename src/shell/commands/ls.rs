@@ -4,10 +4,10 @@ use colored::*;
 
 use super::{Command, ShellState};
 use crate::archive::ArchiveHandler;
-use crate::archive::tar::TarHandler;
-use crate::archive::zip::ZipHandler;
 #[cfg(feature = "parquet")]
 use crate::archive::ParquetHandler;
+use crate::archive::tar::TarHandler;
+use crate::archive::zip::ZipHandler;
 use crate::vfs::{ArchiveType, VfsNode};
 use std::sync::Arc;
 

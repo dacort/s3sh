@@ -1,21 +1,24 @@
-#![cfg(feature = "parquet")]
-
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow_array::*;
-use arrow_array::cast::{as_primitive_array, as_boolean_array, as_string_array, as_generic_binary_array};
+use arrow_array::cast::{
+    as_boolean_array, as_generic_binary_array, as_primitive_array, as_string_array,
+};
 use arrow_array::types::*;
-use chrono;
+use arrow_array::*;
 use arrow_schema::{DataType, Schema};
-use parquet::arrow::{ParquetRecordBatchStreamBuilder, async_reader::{ParquetObjectReader, AsyncFileReader}, ProjectionMask};
-use parquet::file::metadata::ParquetMetaData;
+use chrono;
 use object_store::aws::AmazonS3Builder;
 use object_store::{ObjectStore, path::Path as ObjectPath};
+use parquet::arrow::{
+    ParquetRecordBatchStreamBuilder, ProjectionMask,
+    async_reader::{AsyncFileReader, ParquetObjectReader},
+};
+use parquet::file::metadata::ParquetMetaData;
 
 use aws_credential_types::provider::ProvideCredentials;
 
@@ -28,8 +31,8 @@ use super::ArchiveHandler;
 pub struct ParquetHandler;
 
 // Timeout constants for operations
-const METADATA_READ_TIMEOUT_SECS: u64 = 30;  // Timeout for reading Parquet footer metadata
-const DATA_READ_TIMEOUT_SECS: u64 = 60;      // Timeout for reading column data
+const METADATA_READ_TIMEOUT_SECS: u64 = 30; // Timeout for reading Parquet footer metadata
+const DATA_READ_TIMEOUT_SECS: u64 = 60; // Timeout for reading column data
 
 impl ParquetHandler {
     pub fn new() -> Self {
@@ -44,7 +47,10 @@ impl ParquetHandler {
 
     /// Create an object_store S3 client from pre-loaded AWS config
     /// Accepts config as parameter to avoid redundant credential loading
-    async fn create_object_store(config: &aws_config::SdkConfig, bucket: &str) -> Result<Arc<dyn ObjectStore>> {
+    async fn create_object_store(
+        config: &aws_config::SdkConfig,
+        bucket: &str,
+    ) -> Result<Arc<dyn ObjectStore>> {
         // Config is passed in to avoid duplicate aws_config::load_defaults() calls
 
         // Extract region with proper fallback chain
@@ -53,8 +59,10 @@ impl ParquetHandler {
             .map(|r| r.as_ref().to_string())
             .or_else(|| std::env::var("AWS_DEFAULT_REGION").ok())
             .unwrap_or_else(|| {
-                eprintln!("Warning: No AWS region configured. Using us-west-2 as fallback. \
-                          Set AWS_DEFAULT_REGION or configure region in ~/.aws/config");
+                eprintln!(
+                    "Warning: No AWS region configured. Using us-west-2 as fallback. \
+                          Set AWS_DEFAULT_REGION or configure region in ~/.aws/config"
+                );
                 "us-west-2".to_string()
             });
 
@@ -88,7 +96,11 @@ impl ParquetHandler {
     }
 
     /// Read Parquet metadata (footer) from S3
-    async fn read_metadata(config: &aws_config::SdkConfig, bucket: &str, key: &str) -> Result<(Arc<ParquetMetaData>, Arc<Schema>)> {
+    async fn read_metadata(
+        config: &aws_config::SdkConfig,
+        bucket: &str,
+        key: &str,
+    ) -> Result<(Arc<ParquetMetaData>, Arc<Schema>)> {
         // Create object store using pre-loaded config
         let store = Self::create_object_store(config, bucket).await?;
 
@@ -102,7 +114,7 @@ impl ParquetHandler {
         // Wrap in timeout to prevent indefinite hangs
         let metadata = tokio::time::timeout(
             std::time::Duration::from_secs(METADATA_READ_TIMEOUT_SECS),
-            reader.get_metadata(None)
+            reader.get_metadata(None),
         )
         .await
         .context("Timeout reading Parquet metadata - operation took longer than 30 seconds")?
@@ -166,7 +178,6 @@ impl ParquetHandler {
             _ => format!("{:?}", dt),
         }
     }
-
 
     /// Add _schema.txt virtual file
     fn add_schema_entry(
@@ -288,7 +299,7 @@ impl ParquetHandler {
         if let Some(num_row_groups) = index.metadata.get("num_row_groups") {
             output.push_str(&format!("Row Groups: {}\n", num_row_groups));
         }
-        output.push_str("\n");
+        output.push('\n');
 
         // Schema fields
         output.push_str("Columns:\n");
@@ -354,7 +365,7 @@ impl ParquetHandler {
             Self::format_data_type(field.data_type())
         ));
         output.push_str(&format!("Nullable: {}\n", field.is_nullable()));
-        output.push_str("\n");
+        output.push('\n');
 
         // Statistics from row groups
         output.push_str("Statistics:\n");
@@ -365,22 +376,22 @@ impl ParquetHandler {
 
         // Iterate through row groups
         for (rg_idx, row_group) in metadata.row_groups().iter().enumerate() {
-            if let Some(column_chunk) = row_group.columns().get(column_index) {
-                if let Some(stats) = column_chunk.statistics() {
-                    // Collect stats
-                    if rg_idx == 0 {
-                        output.push_str(&format!(
-                            "  Min Value: {}\n",
-                            Self::format_stat_value(stats.min_bytes_opt())
-                        ));
-                        output.push_str(&format!(
-                            "  Max Value: {}\n",
-                            Self::format_stat_value(stats.max_bytes_opt())
-                        ));
-                    }
-
-                    total_null_count += stats.null_count_opt().unwrap_or(0);
+            if let Some(column_chunk) = row_group.columns().get(column_index)
+                && let Some(stats) = column_chunk.statistics()
+            {
+                // Collect stats
+                if rg_idx == 0 {
+                    output.push_str(&format!(
+                        "  Min Value: {}\n",
+                        Self::format_stat_value(stats.min_bytes_opt())
+                    ));
+                    output.push_str(&format!(
+                        "  Max Value: {}\n",
+                        Self::format_stat_value(stats.max_bytes_opt())
+                    ));
                 }
+
+                total_null_count += stats.null_count_opt().unwrap_or(0);
             }
             total_rows += row_group.num_rows() as u64;
         }
@@ -445,15 +456,27 @@ impl ParquetHandler {
             DataType::Timestamp(unit, tz) => {
                 use arrow_schema::TimeUnit;
                 let timestamp_micros = match unit {
-                    TimeUnit::Second => as_primitive_array::<TimestampSecondType>(array).value(index) * 1_000_000,
-                    TimeUnit::Millisecond => as_primitive_array::<TimestampMillisecondType>(array).value(index) * 1_000,
-                    TimeUnit::Microsecond => as_primitive_array::<TimestampMicrosecondType>(array).value(index),
-                    TimeUnit::Nanosecond => as_primitive_array::<TimestampNanosecondType>(array).value(index) / 1_000,
+                    TimeUnit::Second => {
+                        as_primitive_array::<TimestampSecondType>(array).value(index) * 1_000_000
+                    }
+                    TimeUnit::Millisecond => {
+                        as_primitive_array::<TimestampMillisecondType>(array).value(index) * 1_000
+                    }
+                    TimeUnit::Microsecond => {
+                        as_primitive_array::<TimestampMicrosecondType>(array).value(index)
+                    }
+                    TimeUnit::Nanosecond => {
+                        as_primitive_array::<TimestampNanosecondType>(array).value(index) / 1_000
+                    }
                 };
 
                 if let Some(dt) = chrono::DateTime::from_timestamp_micros(timestamp_micros) {
                     let tz_str = tz.as_ref().map(|s| s.as_ref()).unwrap_or("UTC");
-                    Ok(format!("{} ({})", dt.format("%Y-%m-%dT%H:%M:%S%.3fZ"), tz_str))
+                    Ok(format!(
+                        "{} ({})",
+                        dt.format("%Y-%m-%dT%H:%M:%S%.3fZ"),
+                        tz_str
+                    ))
                 } else {
                     Ok(format!("<invalid timestamp: {}>", timestamp_micros))
                 }
@@ -519,15 +542,18 @@ impl ParquetHandler {
         // Read first batch with timeout
         let batch_result = tokio::time::timeout(
             std::time::Duration::from_secs(DATA_READ_TIMEOUT_SECS),
-            stream.next()
+            stream.next(),
         )
         .await
         .context("Timeout reading column data - operation took longer than 60 seconds")?
         .ok_or_else(|| anyhow!("No data in Parquet file - stream is empty"))?;
 
         let batch = batch_result.map_err(|e| {
-            anyhow!("Failed to read batch from Parquet stream: {}. \
-                    This may indicate a permission issue or file format problem.", e)
+            anyhow!(
+                "Failed to read batch from Parquet stream: {}. \
+                    This may indicate a permission issue or file format problem.",
+                e
+            )
         })?;
 
         // Extract column
@@ -587,7 +613,7 @@ impl ArchiveHandler for ParquetHandler {
             ArchiveEntry::parquet_virtual(
                 "columns".to_string(),
                 0,
-                true, // is_dir
+                true,                        // is_dir
                 ParquetEntryHandler::Schema, // Placeholder handler (not used for directories)
             ),
         );
@@ -596,7 +622,7 @@ impl ArchiveHandler for ParquetHandler {
             ArchiveEntry::parquet_virtual(
                 "stats".to_string(),
                 0,
-                true, // is_dir
+                true,                        // is_dir
                 ParquetEntryHandler::Schema, // Placeholder handler (not used for directories)
             ),
         );
@@ -614,14 +640,8 @@ impl ArchiveHandler for ParquetHandler {
             "num_row_groups".to_string(),
             metadata.num_row_groups().to_string(),
         );
-        metadata_map.insert(
-            "bucket".to_string(),
-            bucket.to_string(),
-        );
-        metadata_map.insert(
-            "key".to_string(),
-            key.to_string(),
-        );
+        metadata_map.insert("bucket".to_string(), bucket.to_string());
+        metadata_map.insert("key".to_string(), key.to_string());
 
         Ok(ArchiveIndex {
             entries,
@@ -738,12 +758,10 @@ impl ArchiveHandler for ParquetHandler {
 
         // Sort results for consistent output
         // Directories first (alphabetically), then files (alphabetically)
-        result.sort_by(|a, b| {
-            match (a.is_dir, b.is_dir) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.path.cmp(&b.path),
-            }
+        result.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.path.cmp(&b.path),
         });
 
         result
