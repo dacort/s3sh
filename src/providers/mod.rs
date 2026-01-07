@@ -58,6 +58,10 @@ pub async fn create_s3_client(config: ProviderConfig) -> Result<(Client, String,
     // Build S3-specific config
     let mut s3_config_builder = aws_sdk_s3::config::Builder::from(&base_config);
 
+    // Set the region explicitly to ensure provider-specified region is used
+    s3_config_builder =
+        s3_config_builder.region(aws_sdk_s3::config::Region::new(default_region.clone()));
+
     if let Some(endpoint) = config.endpoint_url {
         s3_config_builder = s3_config_builder.endpoint_url(endpoint);
     }
