@@ -97,8 +97,8 @@ impl ProviderRegistry {
     }
 
     /// Get a provider by name
-    pub fn get(&self, name: &str) -> Option<&Box<dyn Provider>> {
-        self.providers.get(name)
+    pub fn get(&self, name: &str) -> Option<&dyn Provider> {
+        self.providers.get(name).map(|b| b.as_ref())
     }
 
     /// List all available providers
