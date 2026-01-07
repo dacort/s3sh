@@ -112,6 +112,9 @@ impl ArchiveEntry {
 pub struct ArchiveIndex {
     pub entries: std::collections::HashMap<String, ArchiveEntry>,
     pub metadata: std::collections::HashMap<String, String>,
+    /// Cached object_store client for Parquet files (avoids reloading credentials)
+    #[cfg(feature = "parquet")]
+    pub parquet_store: Option<std::sync::Arc<dyn object_store::ObjectStore>>,
 }
 
 impl ArchiveIndex {

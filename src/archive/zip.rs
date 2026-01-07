@@ -62,6 +62,8 @@ impl ArchiveHandler for ZipHandler {
         Ok(ArchiveIndex {
             entries,
             metadata: std::collections::HashMap::new(),
+            #[cfg(feature = "parquet")]
+            parquet_store: None,
         })
     }
 

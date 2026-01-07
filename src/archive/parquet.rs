@@ -95,20 +95,16 @@ impl ParquetHandler {
         Ok(Arc::new(store))
     }
 
-    /// Read Parquet metadata (footer) from S3
+    /// Read Parquet metadata (footer) from S3 using cached object store
     async fn read_metadata(
-        config: &aws_config::SdkConfig,
-        bucket: &str,
+        store: &Arc<dyn ObjectStore>,
         key: &str,
     ) -> Result<(Arc<ParquetMetaData>, Arc<Schema>)> {
-        // Create object store using pre-loaded config
-        let store = Self::create_object_store(config, bucket).await?;
-
         // Create object path
         let object_path = ObjectPath::from(key);
 
         // Create Parquet reader with path (API changed in 57.x)
-        let mut reader = ParquetObjectReader::new(Arc::clone(&store), object_path);
+        let mut reader = ParquetObjectReader::new(Arc::clone(store), object_path);
 
         // Get metadata (passing None for default ArrowReaderOptions)
         // Wrap in timeout to prevent indefinite hangs
@@ -271,19 +267,19 @@ impl ParquetHandler {
 
     /// Render schema as human-readable text
     async fn render_schema(&self, index: &ArchiveIndex) -> Result<Bytes> {
-        // Re-read metadata to get schema
-        let bucket = index
-            .metadata
-            .get("bucket")
-            .ok_or_else(|| anyhow!("Bucket not found in index metadata"))?;
+        // Get cached object store
+        let store = index
+            .parquet_store
+            .as_ref()
+            .ok_or_else(|| anyhow!("No object store cached in index"))?;
+
         let key = index
             .metadata
             .get("key")
             .ok_or_else(|| anyhow!("Key not found in index metadata"))?;
 
-        // Load AWS config once for this operation
-        let config = Self::load_aws_config().await;
-        let (_metadata, schema) = Self::read_metadata(&config, bucket, key).await?;
+        // Read metadata using cached store
+        let (_metadata, schema) = Self::read_metadata(store, key).await?;
 
         // Build human-readable output
         let mut output = String::new();
@@ -340,16 +336,23 @@ impl ParquetHandler {
     /// Render column statistics from Parquet footer metadata
     async fn render_column_stats(
         &self,
-        bucket: &str,
-        key: &str,
-        _index: &ArchiveIndex,
+        index: &ArchiveIndex,
         column_index: usize,
         column_name: &str,
     ) -> Result<Bytes> {
-        // Load AWS config once for this operation
-        let config = Self::load_aws_config().await;
-        // Re-read metadata to get statistics
-        let (metadata, schema) = Self::read_metadata(&config, bucket, key).await?;
+        // Get cached object store
+        let store = index
+            .parquet_store
+            .as_ref()
+            .ok_or_else(|| anyhow!("No object store cached in index"))?;
+
+        let key = index
+            .metadata
+            .get("key")
+            .ok_or_else(|| anyhow!("Key not found in index metadata"))?;
+
+        // Read metadata using cached store
+        let (metadata, schema) = Self::read_metadata(store, key).await?;
 
         let mut output = String::new();
 
@@ -508,21 +511,27 @@ impl ParquetHandler {
     /// Read and render column data
     async fn render_column_data(
         &self,
-        bucket: &str,
-        key: &str,
+        index: &ArchiveIndex,
         column_index: usize,
         _column_name: &str,
     ) -> Result<Bytes> {
         const DEFAULT_ROW_LIMIT: usize = 100;
 
-        // Load AWS config once for this operation
-        let config = Self::load_aws_config().await;
-        // Create object store and reader
-        let store = Self::create_object_store(&config, bucket).await?;
-        let object_path = ObjectPath::from(key);
+        // Get cached object store
+        let store = index
+            .parquet_store
+            .as_ref()
+            .ok_or_else(|| anyhow!("No object store cached in index"))?;
+
+        let key = index
+            .metadata
+            .get("key")
+            .ok_or_else(|| anyhow!("Key not found in index metadata"))?;
+
+        let object_path = ObjectPath::from(key.as_str());
 
         // Create Parquet reader with path (API changed in 57.x)
-        let reader = ParquetObjectReader::new(store, object_path);
+        let reader = ParquetObjectReader::new(Arc::clone(store), object_path);
 
         // Build stream with column projection
         let builder = ParquetRecordBatchStreamBuilder::new(reader)
@@ -594,11 +603,12 @@ impl ArchiveHandler for ParquetHandler {
             .await
             .context("Failed to verify Parquet file exists")?;
 
-        // Load AWS config once for all operations in this method
+        // Load AWS config once and create object store - this will be cached
         let config = Self::load_aws_config().await;
+        let store = Self::create_object_store(&config, bucket).await?;
 
-        // Read Parquet metadata
-        let (metadata, schema) = Self::read_metadata(&config, bucket, key).await?;
+        // Read Parquet metadata using the store
+        let (metadata, schema) = Self::read_metadata(&store, key).await?;
 
         let mut entries = HashMap::new();
 
@@ -645,14 +655,15 @@ impl ArchiveHandler for ParquetHandler {
         Ok(ArchiveIndex {
             entries,
             metadata: metadata_map,
+            parquet_store: Some(store),
         })
     }
 
     async fn extract_file(
         &self,
         _s3_client: &Arc<S3Client>,
-        bucket: &str,
-        key: &str,
+        _bucket: &str,
+        _key: &str,
         index: &ArchiveIndex,
         file_path: &str,
     ) -> Result<Bytes> {
@@ -674,14 +685,14 @@ impl ArchiveHandler for ParquetHandler {
                     column_index,
                     column_name,
                 } => {
-                    self.render_column_stats(bucket, key, index, *column_index, column_name)
+                    self.render_column_stats(index, *column_index, column_name)
                         .await
                 }
                 ParquetEntryHandler::ColumnData {
                     column_index,
                     column_name,
                 } => {
-                    self.render_column_data(bucket, key, *column_index, column_name)
+                    self.render_column_data(index, *column_index, column_name)
                         .await
                 }
             },
