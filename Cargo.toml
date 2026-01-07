@@ -57,7 +57,7 @@ dirs = "5.0"
 serde_json = "1.0"
 
 # Optional Parquet dependencies (feature-gated)
-parquet = { version = "57.1", optional = true, default-features = false, features = ["arrow", "async", "object_store", "snap", "zstd", "lz4", "brotli"] }
+parquet = { version = "57.1", optional = true, default-features = false, features = ["arrow", "async", "object_store", "snap", "zstd"] }
 object_store = { version = "0.12", optional = true, features = ["aws"] }
 arrow-schema = { version = "57.1", optional = true }
 arrow-array = { version = "57.1", optional = true }
