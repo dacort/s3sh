@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use super::{Command, ShellState};
 use crate::archive::ArchiveHandler;
+#[cfg(feature = "parquet")]
+use crate::archive::ParquetHandler;
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
 use crate::ui::create_spinner;
@@ -274,6 +276,11 @@ impl CdCommand {
                         }
                         ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
                             let handler = TarHandler::new(archive_type.clone());
+                            handler.build_index(state.s3_client(), bucket, key).await?
+                        }
+                        #[cfg(feature = "parquet")]
+                        ArchiveType::Parquet => {
+                            let handler = ParquetHandler::new();
                             handler.build_index(state.s3_client(), bucket, key).await?
                         }
                         _ => {

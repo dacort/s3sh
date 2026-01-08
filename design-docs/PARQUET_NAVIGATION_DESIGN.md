@@ -359,16 +359,114 @@ impl ParquetReader {
 }
 ```
 
+## Optional Feature Flag
+
+Parquet support will be implemented as an **optional Cargo feature** to keep the base installation lightweight.
+
+### Why Optional?
+
+**Size Impact:**
+- Arrow + Parquet = ~50+ transitive dependencies
+- Base s3sh = ~60 dependencies
+- With parquet feature = ~110+ dependencies
+- Significant compile time and binary size savings for users who don't need Parquet
+
+**User Choice:**
+- Data engineers working with Parquet can opt-in
+- Users who just browse S3 buckets and archives keep it lightweight
+- Clear separation between core functionality and advanced features
+
+### Installation
+
+**Without Parquet (default):**
+```bash
+cargo install s3sh
+```
+
+**With Parquet support:**
+```bash
+cargo install s3sh --features parquet
+```
+
+**All features:**
+```bash
+cargo install s3sh --all-features
+```
+
+### Cargo.toml Configuration
+
+```toml
+[features]
+default = []  # Lightweight by default
+parquet = ["dep:arrow", "dep:parquet", "dep:object_store", "dep:comfy-table"]
+
+[dependencies]
+# Core dependencies (always included)
+aws-config = "1.5"
+aws-sdk-s3 = "1.68"
+tokio = { version = "1.42", features = ["full"] }
+# ... other core deps
+
+# Optional dependencies (only with --features parquet)
+arrow = { version = "53.0", optional = true }
+parquet = { version = "53.0", optional = true }
+object_store = { version = "0.11", features = ["aws"], optional = true }
+comfy-table = { version = "7.0", optional = true }
+```
+
+### Conditional Compilation
+
+Code will be feature-gated using `#[cfg(feature = "parquet")]`:
+
+```rust
+// src/archive/mod.rs
+
+#[cfg(feature = "parquet")]
+mod parquet;
+
+pub fn get_handler(path: &str) -> Option<Box<dyn ArchiveHandler>> {
+    if path.ends_with(".tar.gz") || path.ends_with(".tgz") {
+        Some(Box::new(tar::TarHandler))
+    } else if path.ends_with(".zip") {
+        Some(Box::new(zip::ZipHandler))
+    }
+    #[cfg(feature = "parquet")]
+    else if path.ends_with(".parquet") {
+        Some(Box::new(parquet::ParquetHandler))
+    }
+    else {
+        None
+    }
+}
+```
+
+### Future Features
+
+The feature system allows for additional optional functionality:
+
+```toml
+[features]
+default = []
+parquet = ["dep:arrow", "dep:parquet", "dep:object_store", "dep:comfy-table"]
+duckdb = ["dep:duckdb"]           # Future: SQL query engine
+query = ["parquet", "dep:sqlparser"]  # Future: Query pushdown
+all = ["parquet", "duckdb", "query"]  # Convenience meta-feature
+```
+
 ## Implementation Plan
 
 ### Phase 1: Core Infrastructure
 
-1. **Add dependencies**
+1. **Add dependencies (as optional features)**
    ```toml
-   arrow = "53.0"
-   parquet = "53.0"
-   object_store = { version = "0.11", features = ["aws"] }
-   comfy-table = "7.0"  # For pretty table output
+   [features]
+   parquet = ["dep:arrow", "dep:parquet", "dep:object_store", "dep:comfy-table"]
+
+   [dependencies]
+   arrow = { version = "53.0", optional = true }
+   parquet = { version = "53.0", optional = true }
+   object_store = { version = "0.11", features = ["aws"], optional = true }
+   comfy-table = { version = "7.0", optional = true }
    ```
 
 2. **Create ParquetHandler skeleton**
@@ -505,6 +603,8 @@ $ cat columns/metadata
 
 ### New Files
 
+All new files are feature-gated with `#[cfg(feature = "parquet")]`:
+
 - `src/archive/parquet.rs` - ParquetHandler implementation
 - `src/parquet/` (optional) - Parquet-specific utilities
   - `src/parquet/reader.rs` - Wrapper around Arrow ParquetObjectReader
@@ -513,10 +613,12 @@ $ cat columns/metadata
 
 ### Modified Files
 
-- `Cargo.toml` - Add arrow, parquet, object_store, comfy-table dependencies
-- `src/archive/mod.rs` - Register ParquetHandler for `.parquet` extension
+- `Cargo.toml` - Add optional feature flag and optional dependencies
+  - Define `parquet` feature
+  - Add arrow, parquet, object_store, comfy-table as optional dependencies
+- `src/archive/mod.rs` - Register ParquetHandler for `.parquet` extension (feature-gated)
 - `src/archive/mod.rs` - Update `ArchiveEntry` to support virtual files
-- `src/shell/commands/cat.rs` - Handle multi-column output (table format)
+- `src/shell/commands/cat.rs` - Handle multi-column output (table format, feature-gated)
 
 ### Unchanged Files
 
@@ -600,12 +702,13 @@ s3sh:/.../columns $ cat event_type user_id timestamp | head
 
 ## Benefits
 
-1. **No downloads required** - Explore 100GB+ Parquet files without downloading
-2. **Instant schema discovery** - Understand data structure immediately
-3. **Column sampling** - Preview specific columns interactively
-4. **Statistics inspection** - Check data distribution before queries
-5. **Reuses existing UX** - Same `cd`/`ls`/`cat` commands as archives
-6. **Efficient S3 usage** - Arrow's optimized range requests minimize costs
+1. **Optional feature** - Only install if you need it (`cargo install s3sh --features parquet`)
+2. **No downloads required** - Explore 100GB+ Parquet files without downloading
+3. **Instant schema discovery** - Understand data structure immediately
+4. **Column sampling** - Preview specific columns interactively
+5. **Statistics inspection** - Check data distribution before queries
+6. **Reuses existing UX** - Same `cd`/`ls`/`cat` commands as archives
+7. **Efficient S3 usage** - Arrow's optimized range requests minimize costs
 
 ## Future Enhancements
 

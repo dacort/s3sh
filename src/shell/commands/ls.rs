@@ -4,6 +4,8 @@ use colored::*;
 
 use super::{Command, ShellState};
 use crate::archive::ArchiveHandler;
+#[cfg(feature = "parquet")]
+use crate::archive::ParquetHandler;
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
 use crate::vfs::{ArchiveType, VfsNode};
@@ -227,6 +229,11 @@ impl Command for LsCommand {
                                 let handler = TarHandler::new(archive_type.clone());
                                 handler.build_index(state.s3_client(), bucket, key).await?
                             }
+                            #[cfg(feature = "parquet")]
+                            ArchiveType::Parquet => {
+                                let handler = ParquetHandler::new();
+                                handler.build_index(state.s3_client(), bucket, key).await?
+                            }
                             _ => return Err(anyhow!("Archive type not yet supported")),
                         };
                         let arc = Arc::new(built);
@@ -243,6 +250,11 @@ impl Command for LsCommand {
                     }
                     ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
                         let handler = TarHandler::new(archive_type.clone());
+                        handler.list_entries(&idx, "")
+                    }
+                    #[cfg(feature = "parquet")]
+                    ArchiveType::Parquet => {
+                        let handler = ParquetHandler::new();
                         handler.list_entries(&idx, "")
                     }
                     _ => return Err(anyhow!("Archive type not yet supported")),
@@ -350,6 +362,11 @@ impl Command for LsCommand {
                                     let handler = TarHandler::new(archive_type.clone());
                                     handler.build_index(state.s3_client(), bucket, key).await?
                                 }
+                                #[cfg(feature = "parquet")]
+                                ArchiveType::Parquet => {
+                                    let handler = ParquetHandler::new();
+                                    handler.build_index(state.s3_client(), bucket, key).await?
+                                }
                                 _ => return Err(anyhow!("Archive type not yet supported")),
                             };
                             let arc = Arc::new(built);
@@ -368,6 +385,11 @@ impl Command for LsCommand {
                     }
                     ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
                         let handler = TarHandler::new(archive_type.clone());
+                        handler.list_entries(&idx, path)
+                    }
+                    #[cfg(feature = "parquet")]
+                    ArchiveType::Parquet => {
+                        let handler = ParquetHandler::new();
                         handler.list_entries(&idx, path)
                     }
                     _ => return Err(anyhow!("Archive type not yet supported")),

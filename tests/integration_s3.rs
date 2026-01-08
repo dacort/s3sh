@@ -50,7 +50,7 @@ async fn create_test_shell() -> ShellState {
     let client = Client::from_conf(s3_config);
     let s3_client = Arc::new(S3Client::from_client(client, "us-east-1".to_string()));
     let cache = ArchiveCache::new(100);
-    let completion_cache = CompletionCache::new(Arc::clone(&s3_client));
+    let completion_cache = CompletionCache::new(Arc::clone(&s3_client), cache.clone());
 
     let mut state = ShellState::from_components(VfsNode::Root, s3_client, cache, completion_cache);
 

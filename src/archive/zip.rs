@@ -49,12 +49,7 @@ impl ArchiveHandler for ZipHandler {
                     // For now, we'll store the index and calculate offsets when extracting
                     entries.insert(
                         name.clone(),
-                        ArchiveEntry {
-                            path: name,
-                            offset: i as u64, // Store the index, not actual offset
-                            size,
-                            is_dir,
-                        },
+                        ArchiveEntry::physical(name, i as u64, size, is_dir),
                     );
                 }
 
@@ -64,7 +59,12 @@ impl ArchiveHandler for ZipHandler {
             .context("Failed to join blocking task")?
             .context("Failed to build zip index")?;
 
-        Ok(ArchiveIndex { entries })
+        Ok(ArchiveIndex {
+            entries,
+            metadata: std::collections::HashMap::new(),
+            #[cfg(feature = "parquet")]
+            parquet_store: None,
+        })
     }
 
     async fn extract_file(
@@ -91,7 +91,13 @@ impl ArchiveHandler for ZipHandler {
         let reader = stream.into_sync_reader();
 
         // Store the index for use in blocking task
-        let index_num = entry.offset as usize;
+        let index_num = match &entry.entry_type {
+            crate::vfs::EntryType::Physical { offset } => *offset as usize,
+            #[cfg(feature = "parquet")]
+            crate::vfs::EntryType::ParquetVirtual { .. } => {
+                unreachable!("Zip archives should never contain ParquetVirtual entries")
+            }
+        };
 
         // Use spawn_blocking to run sync zip operations in a blocking thread
         let buffer = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {

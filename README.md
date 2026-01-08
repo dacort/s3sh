@@ -1,26 +1,36 @@
 # s3sh - The S3 Shell
 
 ## Overview
-s3sh is an interactive S3 shell for exploring S3-compatible storage with Unix-like commands. Navigate S3 buckets and prefixes like directories, and seamlessly explore archive contents (tar, tar.gz, tar.bz2, zip) without downloading entire files. Supports multiple providers including AWS S3 and Source Cooperative for accessing public geospatial data.
+s3sh is an interactive S3 shell for exploring S3-compatible storage with Unix-like commands. Navigate S3 buckets and prefixes like directories, and seamlessly explore archive contents (tar, tar.gz, tar.bz2, zip, parquet) without downloading entire files. Supports multiple providers including AWS S3 and Source Cooperative for accessing public geospatial data.
 
 ## Key Features
 - **Multi-Provider Support** - Access AWS S3, Source Coop, and other S3-compatible storage services
 - **Unix-like Commands** - Use familiar `ls`, `cd`, `cat`, `pwd` commands to navigate S3
-- **Archive Navigation** - `cd` directly into tar/zip files and explore their contents
+- **Archive Navigation** - `cd` directly into tar/zip/parquet files and explore their contents
+- **Parquet Exploration** - Navigate parquet files like directories, view schemas and column data
 - **Efficient Streaming** - Uses S3 range requests to access archive contents without full downloads
 - **Interactive Shell** - Full command history and line editing via rustyline
 
 ## Installation
 Available via crates.io:
 ```bash
+# Basic installation (tar, zip support)
 cargo install s3sh
+
+# With parquet support (recommended for data files)
+cargo install s3sh --features parquet
 ```
 
 Or build from source:
 ```bash
 git clone https://github.com/dacort/s3sh.git
 cd s3sh
+
+# Basic build
 cargo build --release
+
+# With parquet support
+cargo build --release --features parquet
 ```
 
 ## Usage
@@ -120,6 +130,63 @@ s3sh:/my-bucket/backups/data.tar.gz $ cd configs/
 s3sh:/my-bucket/backups/data.tar.gz/configs $ cat app.yml
 ```
 
+### Parquet File Navigation
+
+Explore parquet files as virtual directories (requires `--features parquet`):
+```bash
+# Navigate into a parquet file
+s3sh:/my-bucket $ cd data/users.parquet
+
+# View the schema
+s3sh:/my-bucket/data/users.parquet $ cat _schema.txt
+Parquet Schema
+==============
+
+Rows: 1000000
+Row Groups: 10
+
+Columns:
+--------
+  id : INT64 (required)
+  name : STRING (nullable)
+  email : STRING (nullable)
+  created_at : TIMESTAMP(Microsecond, UTC) (nullable)
+
+# Navigate to columns directory
+s3sh:/my-bucket/data/users.parquet $ cd columns
+
+# List available columns
+s3sh:/my-bucket/data/users.parquet/columns $ ls
+created_at
+email
+id
+name
+
+# View column data (first 100 rows)
+s3sh:/my-bucket/data/users.parquet/columns $ cat name
+Alice
+Bob
+Charlie
+...
+
+# View column statistics
+s3sh:/my-bucket/data/users.parquet $ cd stats
+s3sh:/my-bucket/data/users.parquet/stats $ cat email
+Column: email
+=============================================
+
+Type: STRING
+Nullable: true
+
+Statistics:
+-----------
+  Min Value: "alice@example.com"
+  Max Value: "zoe@example.com"
+  Total Rows: 1000000
+  Null Count: 42
+  Null %: 0.00%
+```
+
 ### Tab Completion
 
 Smart completion based on context:
@@ -130,9 +197,16 @@ s3sh:/ $ cd my-<TAB>
 # Tab completes objects and prefixes
 s3sh:/my-bucket $ cd log<TAB>
 
-# cd only shows directories
+# cd only shows directories and navigable archives
 s3sh:/my-bucket $ cd <TAB>
-logs/  backups/  configs/  # Only directories shown
+logs/  backups/  data.tar.gz  users.parquet  # Directories and archives
+
+# Works inside archives too
+s3sh:/my-bucket/users.parquet $ cd <TAB>
+columns/  stats/
+
+s3sh:/my-bucket/users.parquet/columns $ cd e<TAB>
+email
 
 # cat shows all files
 s3sh:/my-bucket $ cat <TAB>
@@ -143,6 +217,11 @@ logs/  data.json  config.yml  # Files and directories
 - **Gzip Tar** - `.tar.gz`, `.tgz`
 - **Bzip2 Tar** - `.tar.bz2`, `.tbz2`
 - **Zip** - `.zip`
+- **Parquet** - `.parquet` (requires `--features parquet`)
+  - View schema information
+  - Browse columns as virtual files
+  - Access column statistics
+  - Preview column data (first 100 rows)
 
 ## Authentication
 

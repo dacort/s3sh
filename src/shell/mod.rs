@@ -35,7 +35,7 @@ impl ShellState {
     /// Create shell state with a specific S3 client (for provider support)
     pub async fn with_client(s3_client: Arc<S3Client>) -> Result<Self> {
         let cache = ArchiveCache::new(100);
-        let completion_cache = CompletionCache::new(Arc::clone(&s3_client));
+        let completion_cache = CompletionCache::new(Arc::clone(&s3_client), cache.clone());
 
         let mut state = ShellState {
             current_node: VfsNode::Root,
