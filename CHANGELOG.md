@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/dacort/s3sh/compare/v0.1.2...v0.2.0) - 2026-01-08
+
+### Added
+
+- Initial parquet support ([#11](https://github.com/dacort/s3sh/pull/11))
+
 ## [0.1.2](https://github.com/dacort/s3sh/compare/v0.1.1...v0.1.2) - 2026-01-07
 
 ### Other

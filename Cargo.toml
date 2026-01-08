@@ -1,6 +1,6 @@
 [package]
 name = "s3sh"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 authors = ["Damon Cortesi <dacort@github.com>"]
 description = "Interactive S3 shell with Unix-like commands and archive navigation"
