@@ -3,8 +3,14 @@ use rustyline::completion::{Completer, Pair};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use crate::archive::ArchiveHandler;
+use crate::cache::ArchiveCache;
 use crate::s3::S3Client;
 use crate::vfs::{ArchiveType, VfsNode};
+
+#[cfg(feature = "parquet")]
+use crate::archive::ParquetHandler;
+use crate::archive::{tar::TarHandler, zip::ZipHandler};
 
 /// Entry in completion cache with metadata
 #[derive(Clone, Debug)]
@@ -32,10 +38,12 @@ pub struct CompletionCache {
     current_node: Arc<RwLock<VfsNode>>,
     /// S3 client for lazy loading
     s3_client: Arc<S3Client>,
+    /// Archive cache for accessing archive indexes
+    archive_cache: ArchiveCache,
 }
 
 impl CompletionCache {
-    pub fn new(s3_client: Arc<S3Client>) -> Self {
+    pub fn new(s3_client: Arc<S3Client>, archive_cache: ArchiveCache) -> Self {
         CompletionCache {
             entries: Arc::new(RwLock::new(HashMap::new())),
             commands: vec![
@@ -48,6 +56,7 @@ impl CompletionCache {
             ],
             current_node: Arc::new(RwLock::new(VfsNode::Root)),
             s3_client,
+            archive_cache,
         }
     }
 
@@ -90,6 +99,11 @@ impl CompletionCache {
     /// Get S3 client
     pub fn s3_client(&self) -> &Arc<S3Client> {
         &self.s3_client
+    }
+
+    /// Get archive cache
+    pub fn archive_cache(&self) -> &ArchiveCache {
+        &self.archive_cache
     }
 }
 
@@ -209,7 +223,25 @@ impl ShellCompleter {
             VfsNode::Prefix { bucket, prefix } => {
                 format!("/{}/{}", bucket, prefix.trim_end_matches('/'))
             }
-            _ => "/".to_string(), // Simplified for now
+            VfsNode::Archive { parent, .. } => {
+                // Archive root - use the parent object's path
+                match parent.as_ref() {
+                    VfsNode::Object { bucket, key, .. } => {
+                        format!("/{}/{}@archive", bucket, key)
+                    }
+                    _ => "/".to_string(),
+                }
+            }
+            VfsNode::ArchiveEntry { archive, path, .. } => {
+                // Entry within archive - append path to archive key
+                let archive_key = self.node_to_cache_key(archive.as_ref());
+                if path.is_empty() {
+                    archive_key
+                } else {
+                    format!("{}/{}", archive_key, path.trim_end_matches('/'))
+                }
+            }
+            _ => "/".to_string(),
         }
     }
 
@@ -246,6 +278,7 @@ impl ShellCompleter {
     fn fetch_entries_for_path(&self, rel_path: &str) -> Result<Vec<CompletionEntry>, ()> {
         let current = self.cache.get_current_node();
         let s3_client = self.cache.s3_client().clone();
+        let archive_cache = self.cache.archive_cache().clone();
         let rel_path = rel_path.to_string();
 
         // Use a channel to bridge sync completion with async S3 calls
@@ -256,8 +289,13 @@ impl ShellCompleter {
         let current_clone = current.clone();
 
         handle.spawn(async move {
-            let result =
-                Self::fetch_entries_async_static(&s3_client, &current_clone, &rel_path).await;
+            let result = Self::fetch_entries_async_static(
+                &s3_client,
+                &archive_cache,
+                &current_clone,
+                &rel_path,
+            )
+            .await;
             let _ = tx.send(result);
         });
 
@@ -268,6 +306,7 @@ impl ShellCompleter {
     /// Static async helper to fetch entries (can be called from spawned task)
     async fn fetch_entries_async_static(
         s3_client: &S3Client,
+        archive_cache: &ArchiveCache,
         current: &VfsNode,
         rel_path: &str,
     ) -> Result<Vec<CompletionEntry>, ()> {
@@ -347,6 +386,118 @@ impl ShellCompleter {
 
                 Ok(entries)
             }
+            VfsNode::Archive {
+                ref parent,
+                ref archive_type,
+                ref index,
+            } => {
+                // List entries at the root of the archive
+                let archive_index = if let Some(idx) = index {
+                    Arc::clone(idx)
+                } else {
+                    // Try to get from cache
+                    let (bucket, key) = match parent.as_ref() {
+                        VfsNode::Object { bucket, key, .. } => (bucket, key),
+                        _ => return Ok(Vec::new()),
+                    };
+                    let cache_key = format!("s3://{}/{}", bucket, key);
+                    archive_cache.get(&cache_key).ok_or(())?
+                };
+
+                // Get the appropriate handler and list entries
+                let handler_entries: Vec<_> = match archive_type {
+                    ArchiveType::Zip => {
+                        let handler = ZipHandler::new();
+                        handler.list_entries(&archive_index, "")
+                    }
+                    ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                        let handler = TarHandler::new(archive_type.clone());
+                        handler.list_entries(&archive_index, "")
+                    }
+                    #[cfg(feature = "parquet")]
+                    ArchiveType::Parquet => {
+                        let handler = ParquetHandler::new();
+                        handler.list_entries(&archive_index, "")
+                    }
+                    _ => return Ok(Vec::new()),
+                };
+
+                // Convert ArchiveEntry to CompletionEntry
+                Ok(handler_entries
+                    .into_iter()
+                    .map(|entry| CompletionEntry {
+                        name: entry
+                            .path
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&entry.path)
+                            .to_string(),
+                        is_dir: entry.is_dir,
+                    })
+                    .collect())
+            }
+            VfsNode::ArchiveEntry {
+                ref archive,
+                ref path,
+                ..
+            } => {
+                // List entries within an archive directory
+                let archive_node = archive.as_ref();
+                let (archive_type, archive_index) = match archive_node {
+                    VfsNode::Archive {
+                        archive_type,
+                        index,
+                        parent,
+                        ..
+                    } => {
+                        let idx = if let Some(idx) = index {
+                            Arc::clone(idx)
+                        } else {
+                            // Try to get from cache
+                            let (bucket, key) = match parent.as_ref() {
+                                VfsNode::Object { bucket, key, .. } => (bucket, key),
+                                _ => return Ok(Vec::new()),
+                            };
+                            let cache_key = format!("s3://{}/{}", bucket, key);
+                            archive_cache.get(&cache_key).ok_or(())?
+                        };
+                        (archive_type, idx)
+                    }
+                    _ => return Ok(Vec::new()),
+                };
+
+                // Get the appropriate handler and list entries at this path
+                let handler_entries: Vec<_> = match archive_type {
+                    ArchiveType::Zip => {
+                        let handler = ZipHandler::new();
+                        handler.list_entries(&archive_index, path)
+                    }
+                    ArchiveType::Tar | ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                        let handler = TarHandler::new(archive_type.clone());
+                        handler.list_entries(&archive_index, path)
+                    }
+                    #[cfg(feature = "parquet")]
+                    ArchiveType::Parquet => {
+                        let handler = ParquetHandler::new();
+                        handler.list_entries(&archive_index, path)
+                    }
+                    _ => return Ok(Vec::new()),
+                };
+
+                // Convert ArchiveEntry to CompletionEntry
+                Ok(handler_entries
+                    .into_iter()
+                    .map(|entry| CompletionEntry {
+                        name: entry
+                            .path
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&entry.path)
+                            .to_string(),
+                        is_dir: entry.is_dir,
+                    })
+                    .collect())
+            }
             _ => Ok(Vec::new()),
         }
     }
@@ -393,6 +544,26 @@ impl ShellCompleter {
                     }
                 }
             }
+            VfsNode::Archive { parent, .. } => *parent.clone(),
+            VfsNode::ArchiveEntry { archive, path, .. } => {
+                // Go up within the archive
+                if path.trim_end_matches('/').contains('/') {
+                    let parent_path = path
+                        .trim_end_matches('/')
+                        .rsplit_once('/')
+                        .unwrap()
+                        .0
+                        .to_string();
+                    VfsNode::ArchiveEntry {
+                        archive: archive.clone(),
+                        path: parent_path,
+                        size: 0,
+                        is_dir: true,
+                    }
+                } else {
+                    *archive.clone()
+                }
+            }
             _ => current.clone(),
         }
     }
@@ -411,6 +582,29 @@ impl ShellCompleter {
                 bucket: bucket.clone(),
                 prefix: format!("{prefix}{name}/"),
             },
+            VfsNode::Archive { .. } => {
+                // Navigating into a child of the archive root
+                VfsNode::ArchiveEntry {
+                    archive: Box::new(current.clone()),
+                    path: name.to_string(),
+                    size: 0,
+                    is_dir: true,
+                }
+            }
+            VfsNode::ArchiveEntry { archive, path, .. } => {
+                // Navigating into a child of an archive directory
+                let child_path = if path.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{}/{}", path.trim_end_matches('/'), name)
+                };
+                VfsNode::ArchiveEntry {
+                    archive: archive.clone(),
+                    path: child_path,
+                    size: 0,
+                    is_dir: true,
+                }
+            }
             _ => current.clone(),
         }
     }

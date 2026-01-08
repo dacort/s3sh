@@ -93,6 +93,9 @@ impl ArchiveHandler for ZipHandler {
         // Store the index for use in blocking task
         let index_num = match &entry.entry_type {
             crate::vfs::EntryType::Physical { offset } => *offset as usize,
+            crate::vfs::EntryType::ParquetVirtual { .. } => {
+                unreachable!("Zip archives should never contain ParquetVirtual entries")
+            }
         };
 
         // Use spawn_blocking to run sync zip operations in a blocking thread
