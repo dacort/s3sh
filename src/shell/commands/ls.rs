@@ -11,21 +11,8 @@ use crate::archive::zip::ZipHandler;
 use crate::vfs::{ArchiveType, VfsNode};
 use std::sync::Arc;
 
-/// Helper macro to print with BrokenPipe handling
-/// Returns Ok(()) early if BrokenPipe is encountered
-macro_rules! print_line {
-    ($($arg:tt)*) => {{
-        use std::io::Write;
-        let result = writeln!(std::io::stdout(), $($arg)*);
-        match result {
-            Ok(_) => {},
-            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }};
-}
+// Import the shared macro
+use crate::print_line;
 
 pub struct LsCommand;
 
