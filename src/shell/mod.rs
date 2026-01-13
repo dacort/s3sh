@@ -3,6 +3,8 @@ pub mod completion;
 
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
+use std::io::Write;
+use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::Arc;
 
 use crate::cache::ArchiveCache;
@@ -86,6 +88,81 @@ impl ShellState {
             return Ok(());
         }
 
+        // Check if there's a pipe in the command
+        let (command_part, pipeline_part) = Self::split_pipeline(line);
+
+        if let Some(pipeline) = pipeline_part {
+            // Execute command with output piped to shell
+            self.execute_with_pipe(&command_part, &pipeline).await
+        } else {
+            // Normal execution
+            self.execute_internal(line).await
+        }
+    }
+
+    /// Execute a command with its output piped to a shell command
+    #[cfg(unix)]
+    async fn execute_with_pipe(&mut self, command: &str, pipeline: &str) -> Result<()> {
+        use std::os::unix::io::AsRawFd;
+
+        // Spawn shell process with the pipeline
+        let mut child = ProcessCommand::new("sh")
+            .arg("-c")
+            .arg(pipeline)
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|e| anyhow!("Failed to spawn shell: {}", e))?;
+
+        // Get stdin handle
+        let child_stdin = child.stdin.take().ok_or_else(|| anyhow!("Failed to open stdin"))?;
+        let child_fd = child_stdin.as_raw_fd();
+
+        // Save the original stdout
+        let stdout_fd = std::io::stdout().as_raw_fd();
+        let saved_stdout = unsafe { libc::dup(stdout_fd) };
+        if saved_stdout < 0 {
+            drop(child_stdin);
+            child.kill().ok();
+            return Err(anyhow!("Failed to duplicate stdout"));
+        }
+
+        // Redirect stdout to the pipe's stdin
+        let dup_result = unsafe { libc::dup2(child_fd, stdout_fd) };
+        if dup_result < 0 {
+            unsafe { libc::close(saved_stdout); }
+            drop(child_stdin);
+            child.kill().ok();
+            return Err(anyhow!("Failed to redirect stdout"));
+        }
+
+        // Execute the command (it will write to the redirected stdout)
+        let result = self.execute_internal(command).await;
+
+        // Flush stdout to ensure all data is sent
+        let _ = std::io::stdout().flush();
+
+        // Restore original stdout
+        unsafe { libc::dup2(saved_stdout, stdout_fd); }
+        unsafe { libc::close(saved_stdout); }
+
+        // Close the pipe to signal EOF to the child
+        drop(child_stdin);
+
+        // Wait for the child process
+        let _status = child.wait().map_err(|e| anyhow!("Failed to wait for child: {}", e))?;
+
+        // Return the command's result
+        // Ignore the child's exit status - it's ok if grep finds nothing, head exits early, etc.
+        result
+    }
+
+    #[cfg(not(unix))]
+    async fn execute_with_pipe(&mut self, _command: &str, _pipeline: &str) -> Result<()> {
+        Err(anyhow!("Pipe support is only available on Unix systems"))
+    }
+
+    /// Internal execute for normal (non-piped) commands
+    async fn execute_internal(&mut self, line: &str) -> Result<()> {
         // Parse command line respecting quotes
         let parts = Self::parse_command_line(line)?;
 
@@ -192,11 +269,54 @@ impl ShellState {
         println!("  pwd            - Print working directory");
         println!("  help           - Show this help");
         println!("  exit/quit      - Exit the shell");
+        println!();
+        println!("Pipe support:");
+        println!("  You can pipe command output to external tools:");
+        println!("  ls | grep pattern");
+        println!("  cat file.json | jq .");
+        println!("  cat large.log | less");
     }
 
     /// Get the prompt string
     pub fn prompt(&self) -> String {
         format!("s3sh:{} $ ", self.current_path())
+    }
+
+    /// Split command line on first unquoted pipe character
+    /// Returns (command, Some(pipeline)) or (command, None)
+    fn split_pipeline(line: &str) -> (String, Option<String>) {
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        let mut escape_next = false;
+
+        for (i, ch) in line.char_indices() {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+
+            match ch {
+                '\\' if !in_single_quote => {
+                    escape_next = true;
+                }
+                '\'' if !in_double_quote => {
+                    in_single_quote = !in_single_quote;
+                }
+                '"' if !in_single_quote => {
+                    in_double_quote = !in_double_quote;
+                }
+                '|' if !in_single_quote && !in_double_quote => {
+                    // Found first unquoted pipe
+                    let command = line[..i].trim().to_string();
+                    let pipeline = line[i + 1..].trim().to_string();
+                    return (command, Some(pipeline));
+                }
+                _ => {}
+            }
+        }
+
+        // No pipe found
+        (line.to_string(), None)
     }
 
     /// Parse command line respecting quotes (both single and double)
