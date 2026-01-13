@@ -114,7 +114,10 @@ impl ShellState {
             .map_err(|e| anyhow!("Failed to spawn shell: {}", e))?;
 
         // Get stdin handle
-        let child_stdin = child.stdin.take().ok_or_else(|| anyhow!("Failed to open stdin"))?;
+        let child_stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open stdin"))?;
         let child_fd = child_stdin.as_raw_fd();
 
         // Save the original stdout
@@ -129,7 +132,9 @@ impl ShellState {
         // Redirect stdout to the pipe's stdin
         let dup_result = unsafe { libc::dup2(child_fd, stdout_fd) };
         if dup_result < 0 {
-            unsafe { libc::close(saved_stdout); }
+            unsafe {
+                libc::close(saved_stdout);
+            }
             drop(child_stdin);
             child.kill().ok();
             return Err(anyhow!("Failed to redirect stdout"));
@@ -142,14 +147,20 @@ impl ShellState {
         let _ = std::io::stdout().flush();
 
         // Restore original stdout
-        unsafe { libc::dup2(saved_stdout, stdout_fd); }
-        unsafe { libc::close(saved_stdout); }
+        unsafe {
+            libc::dup2(saved_stdout, stdout_fd);
+        }
+        unsafe {
+            libc::close(saved_stdout);
+        }
 
         // Close the pipe to signal EOF to the child
         drop(child_stdin);
 
         // Wait for the child process
-        let _status = child.wait().map_err(|e| anyhow!("Failed to wait for child: {}", e))?;
+        let _status = child
+            .wait()
+            .map_err(|e| anyhow!("Failed to wait for child: {}", e))?;
 
         // Return the command's result
         // Ignore the child's exit status - it's ok if grep finds nothing, head exits early, etc.
