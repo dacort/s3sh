@@ -6,6 +6,7 @@ s3sh is an interactive S3 shell for exploring S3-compatible storage with Unix-li
 ## Key Features
 - **Multi-Provider Support** - Access AWS S3, Source Coop, and other S3-compatible storage services
 - **Unix-like Commands** - Use familiar `ls`, `cd`, `cat`, `pwd` commands to navigate S3
+- **Pipe Support** - Stream command output to external tools like `grep`, `jq`, `less`, `head`, etc.
 - **Archive Navigation** - `cd` directly into tar/zip/parquet files and explore their contents
 - **Parquet Exploration** - Navigate parquet files like directories, view schemas and column data
 - **Efficient Streaming** - Uses S3 range requests to access archive contents without full downloads
@@ -186,6 +187,34 @@ Statistics:
   Null Count: 42
   Null %: 0.00%
 ```
+
+### Pipe Support
+
+Pipe command output to external Unix utilities:
+```bash
+# Use grep to filter listings
+s3sh:/my-bucket $ ls | grep .json
+data.json
+config.json
+users.json
+
+# Pipe file contents to jq for JSON formatting
+s3sh:/my-bucket $ cat data.json | jq .
+
+# Count lines in a file
+s3sh:/my-bucket/logs $ cat app.log | wc -l
+
+# Use head to preview large listings
+s3sh:/my-bucket $ ls | head -20
+
+# Pipe to less for pagination
+s3sh:/my-bucket $ cat large-file.txt | less
+
+# Chain multiple pipes (shell handles the pipeline)
+s3sh:/my-bucket $ ls | grep .log | sort | uniq
+```
+
+The pipe implementation uses Unix file descriptor redirection to stream output directly to external commands, supporting any valid shell pipeline including multiple pipes, redirections, and command substitutions.
 
 ### Tab Completion
 

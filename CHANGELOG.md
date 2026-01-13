@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Unix-style pipe support for streaming command output to external tools
+  - Pipe `ls` output to `grep`, `sort`, `head`, etc.
+  - Pipe `cat` output to `jq`, `less`, `wc`, and other utilities
+  - Support for complex shell pipelines with multiple pipes
+  - Uses file descriptor redirection for efficient streaming
+  - Unix-only feature (requires Unix platform)
+
 ## [0.1.2](https://github.com/dacort/s3sh/compare/v0.1.1...v0.1.2) - 2026-01-07
 
 ### Other

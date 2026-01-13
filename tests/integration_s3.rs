@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use s3sh::cache::ArchiveCache;
 use s3sh::s3::S3Client;
-use s3sh::shell::commands::{Command, cat::CatCommand, cd::CdCommand};
+use s3sh::shell::commands::{Command, cat::CatCommand, cd::CdCommand, ls::LsCommand};
 use s3sh::shell::{CompletionCache, ShellState};
 use s3sh::vfs::VfsNode;
 
@@ -57,6 +57,7 @@ async fn create_test_shell() -> ShellState {
     // Register commands
     state.register_command_pub(Arc::new(CdCommand));
     state.register_command_pub(Arc::new(CatCommand));
+    state.register_command_pub(Arc::new(LsCommand));
 
     state
 }
@@ -390,4 +391,43 @@ async fn test_cd_parent_from_archive() {
         }
         _ => panic!("Expected to be in bucket after cd .. from archive (second time)"),
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore] // Run with: cargo test -- --ignored --test-threads=1
+async fn test_pipe_support() {
+    let client = create_localstack_client().await;
+
+    // Verify localstack is running
+    let resp = client.list_buckets().send().await;
+    assert!(resp.is_ok(), "Failed to connect to Localstack S3");
+
+    // Setup test environment
+    setup_test_bucket(&client).await;
+
+    // Create shell state
+    let mut shell = create_test_shell().await;
+
+    // Navigate to bucket
+    let cd_cmd = CdCommand;
+    cd_cmd
+        .execute(&mut shell, &[TEST_BUCKET.to_string()])
+        .await
+        .expect("Failed to cd into bucket");
+
+    // Test: Execute command with pipe to grep (should not panic or error)
+    // Note: This test verifies the pipe infrastructure works, but since
+    // we can't easily capture the output of external commands in tests,
+    // we just verify it doesn't crash
+    let result = shell.execute("ls | grep test").await;
+    assert!(result.is_ok(), "Pipe command should execute without error");
+
+    // Test: Execute command with pipe to head
+    let result = shell.execute("ls | head -1").await;
+    assert!(result.is_ok(), "Pipe to head should execute without error");
+
+    // Test: Command without pipe still works
+    let result = shell.execute("pwd").await;
+    assert!(result.is_ok(), "Non-piped command should still work");
 }

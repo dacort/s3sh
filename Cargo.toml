@@ -55,6 +55,7 @@ chrono = "0.4"
 humansize = "2.1"
 dirs = "5.0"
 serde_json = "1.0"
+libc = "0.2"
 
 # Optional Parquet dependencies (feature-gated)
 parquet = { version = "57.1", optional = true, default-features = false, features = ["arrow", "async", "object_store", "snap", "zstd"] }
