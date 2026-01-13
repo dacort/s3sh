@@ -1,6 +1,5 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use std::io::Write;
 use std::sync::Arc;
 
 use super::{Command, ShellState};
@@ -12,33 +11,8 @@ use crate::archive::zip::ZipHandler;
 use crate::ui::create_spinner;
 use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
 
-/// Helper macro to print with BrokenPipe handling (with newline)
-macro_rules! print_line {
-    ($($arg:tt)*) => {{
-        let result = writeln!(std::io::stdout(), $($arg)*);
-        match result {
-            Ok(_) => {},
-            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }};
-}
-
-/// Helper macro to print with BrokenPipe handling (no newline)
-macro_rules! print_str {
-    ($($arg:tt)*) => {{
-        let result = write!(std::io::stdout(), $($arg)*);
-        match result {
-            Ok(_) => {},
-            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }};
-}
+// Import the shared macros
+use crate::{print_line, print_str};
 
 pub struct CatCommand;
 
