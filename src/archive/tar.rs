@@ -308,3 +308,59 @@ async fn stream_list_tar<R: AsyncRead + Unpin>(mut r: R) -> Result<HashMap<Strin
 
     Ok(entries)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_cstr() {
+        let field = b"test.txt\0\0\0\0";
+        assert_eq!(parse_cstr(field), "test.txt");
+        
+        let field = b"test\0";
+        assert_eq!(parse_cstr(field), "test");
+        
+        let field = b"\0\0\0\0";
+        assert_eq!(parse_cstr(field), "");
+    }
+
+    #[test]
+    fn test_parse_octal_u64() {
+        // Standard octal number
+        let field = b"0000644\0";
+        assert_eq!(parse_octal_u64(field), Some(420));
+        
+        // Empty field
+        let field = b"\0\0\0\0";
+        assert_eq!(parse_octal_u64(field), Some(0));
+        
+        // File size example (100 bytes)
+        let field = b"0000144\0";
+        assert_eq!(parse_octal_u64(field), Some(100));
+        
+        // Large file size (1MB = 1048576 bytes = 0o4000000)
+        let field = b"04000000\0";
+        assert_eq!(parse_octal_u64(field), Some(1048576));
+    }
+
+    #[test]
+    fn test_round_up_512() {
+        assert_eq!(round_up_512(0), 0);
+        assert_eq!(round_up_512(1), 512);
+        assert_eq!(round_up_512(512), 512);
+        assert_eq!(round_up_512(513), 1024);
+        assert_eq!(round_up_512(1000), 1024);
+        assert_eq!(round_up_512(1024), 1024);
+    }
+
+    #[tokio::test]
+    async fn test_stream_list_tar_empty() {
+        // Create an empty tar (two zero blocks)
+        let data = vec![0u8; 1024];
+        let result = stream_list_tar(data.as_slice()).await;
+        assert!(result.is_ok());
+        let entries = result.unwrap();
+        assert_eq!(entries.len(), 0);
+    }
+}
