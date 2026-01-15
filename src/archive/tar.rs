@@ -4,11 +4,15 @@ use bytes::Bytes;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use async_compression::tokio::bufread::{GzipDecoder, BzDecoder};
 
 use crate::s3::{S3Client, S3Stream};
 use crate::vfs::{ArchiveEntry, ArchiveIndex, ArchiveType};
 
 use super::ArchiveHandler;
+
+const TAR_BLOCK: usize = 512;
 
 pub struct TarHandler {
     archive_type: ArchiveType,
@@ -28,67 +32,30 @@ impl ArchiveHandler for TarHandler {
         bucket: &str,
         key: &str,
     ) -> Result<ArchiveIndex> {
-        // Create S3 stream
-        let stream =
-            S3Stream::new(Arc::clone(s3_client), bucket.to_string(), key.to_string()).await?;
+        // Get streaming byte stream from S3
+        let byte_stream = s3_client.get_object_stream(bucket, key).await?;
 
-        // Use spawn_blocking to run sync tar operations in a blocking thread
-        // This prevents the "cannot start runtime within runtime" error
-        let archive_type = self.archive_type.clone();
-        let entries =
-            tokio::task::spawn_blocking(move || -> Result<HashMap<String, ArchiveEntry>> {
-                // Create sync reader and decoder inside the blocking task
-                let reader = stream.into_sync_reader();
-                let reader: Box<dyn Read + Send> = match archive_type {
-                    ArchiveType::Tar => Box::new(reader),
-                    ArchiveType::TarGz => Box::new(flate2::read::GzDecoder::new(reader)),
-                    ArchiveType::TarBz2 => Box::new(bzip2::read::BzDecoder::new(reader)),
-                    _ => return Err(anyhow!("Unsupported tar archive type: {archive_type:?}")),
-                };
+        // Convert ByteStream to AsyncRead
+        let reader = byte_stream.into_async_read();
 
-                let mut archive = tar::Archive::new(reader);
-                let mut entries = HashMap::new();
-                let mut current_offset = 0u64;
-
-                // Iterate through all entries in the tar
-                for (index, entry_result) in archive.entries()?.enumerate() {
-                    let entry =
-                        entry_result.context(format!("Failed to read tar entry {index}"))?;
-
-                    let path = entry
-                        .path()
-                        .context("Failed to get entry path")?
-                        .to_string_lossy()
-                        .to_string();
-
-                    let size = entry.size();
-                    let is_dir = entry.header().entry_type().is_dir();
-
-                    // For compressed archives, we can't use real offsets
-                    // Store the index instead (similar to zip approach)
-                    let offset = match archive_type {
-                        ArchiveType::Tar => current_offset,
-                        _ => index as u64, // For compressed, store entry index
-                    };
-
-                    entries.insert(
-                        path.clone(),
-                        ArchiveEntry::physical(path, offset, size, is_dir),
-                    );
-
-                    // Update offset for next entry (512-byte aligned)
-                    // Each header is 512 bytes, data is padded to 512-byte blocks
-                    if archive_type == ArchiveType::Tar {
-                        current_offset += 512; // Header
-                        current_offset += size.div_ceil(512) * 512; // Data (rounded up)
-                    }
-                }
-
-                Ok(entries)
-            })
-            .await
-            .context("Failed to join blocking task")?
-            .context("Failed to build tar index")?;
+        // Wrap reader based on archive type
+        let entries = match self.archive_type {
+            ArchiveType::Tar => {
+                // Uncompressed tar - stream directly
+                stream_list_tar(reader).await?
+            }
+            ArchiveType::TarGz => {
+                // Gzip compressed - use streaming decompression
+                let gz = GzipDecoder::new(tokio::io::BufReader::new(reader));
+                stream_list_tar(gz).await?
+            }
+            ArchiveType::TarBz2 => {
+                // Bzip2 compressed - use streaming decompression
+                let bz = BzDecoder::new(tokio::io::BufReader::new(reader));
+                stream_list_tar(bz).await?
+            }
+            _ => return Err(anyhow!("Unsupported tar archive type: {:?}", self.archive_type)),
+        };
 
         Ok(ArchiveIndex {
             entries,
@@ -244,4 +211,100 @@ impl ArchiveHandler for TarHandler {
 
         result
     }
+}
+
+// Helper functions for streaming tar parsing
+
+/// Parse a null-terminated C string from a tar header field
+fn parse_cstr(field: &[u8]) -> String {
+    let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
+    String::from_utf8_lossy(&field[..end]).trim().to_string()
+}
+
+/// Parse an octal number from a tar header field
+fn parse_octal_u64(field: &[u8]) -> Option<u64> {
+    let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
+    let s = String::from_utf8_lossy(&field[..end]).trim().to_string();
+    if s.is_empty() {
+        return Some(0);
+    }
+    u64::from_str_radix(s.trim_matches(|c: char| c == '\0' || c.is_whitespace()), 8).ok()
+}
+
+/// Round up to next 512-byte boundary
+fn round_up_512(n: u64) -> u64 {
+    if n == 0 { 0 } else { ((n + 511) / 512) * 512 }
+}
+
+/// Skip exactly n bytes from an async reader
+async fn skip_exact<R: AsyncRead + Unpin>(r: &mut R, mut n: u64) -> Result<()> {
+    let mut buf = [0u8; 64 * 1024];
+    while n > 0 {
+        let want = std::cmp::min(n as usize, buf.len());
+        r.read_exact(&mut buf[..want]).await
+            .map_err(|e| anyhow!("EOF while skipping tar payload: {e}"))?;
+        n -= want as u64;
+    }
+    Ok(())
+}
+
+/// Stream tar headers from an async reader without reading file contents
+async fn stream_list_tar<R: AsyncRead + Unpin>(mut r: R) -> Result<HashMap<String, ArchiveEntry>> {
+    let mut header = [0u8; TAR_BLOCK];
+    let mut zero_blocks = 0u8;
+    let mut entries = HashMap::new();
+    let mut current_offset = 0u64;
+
+    loop {
+        // Read next 512-byte header
+        if let Err(e) = r.read_exact(&mut header).await {
+            // If we hit EOF, check if we already have entries (incomplete archive is ok)
+            if !entries.is_empty() {
+                break;
+            }
+            return Err(anyhow!("EOF while reading tar header: {e}"));
+        }
+
+        // Check for end-of-archive marker (two consecutive zero blocks)
+        if header.iter().all(|&b| b == 0) {
+            zero_blocks += 1;
+            if zero_blocks >= 2 {
+                break;
+            }
+            continue;
+        } else {
+            zero_blocks = 0;
+        }
+
+        // Parse header fields
+        let name = parse_cstr(&header[0..100]);
+        let prefix = parse_cstr(&header[345..500]);
+        let path = if !prefix.is_empty() { 
+            format!("{}/{}", prefix, name) 
+        } else { 
+            name 
+        };
+
+        let size = parse_octal_u64(&header[124..136])
+            .ok_or_else(|| anyhow!("bad size field for entry {path:?}"))?;
+
+        let typeflag = header[156] as char;
+        let is_dir = typeflag == '5' || path.ends_with('/');
+
+        // Store the entry
+        entries.insert(
+            path.clone(),
+            ArchiveEntry::physical(path, current_offset, size, is_dir),
+        );
+
+        // Update offset for next entry (512-byte header + padded data)
+        current_offset += 512; // Header
+        current_offset += round_up_512(size); // Data (rounded up to 512 boundary)
+
+        // Skip payload without reading it into memory
+        let to_skip = round_up_512(size);
+        skip_exact(&mut r, to_skip).await?;
+    }
+
+    Ok(entries)
 }

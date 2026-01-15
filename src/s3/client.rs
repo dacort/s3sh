@@ -283,6 +283,24 @@ impl S3Client {
 
         Ok(bytes)
     }
+
+    /// Get the streaming ByteStream from an object (for efficient streaming)
+    pub async fn get_object_stream(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<aws_sdk_s3::primitives::ByteStream> {
+        let client = self.get_client_for_bucket(bucket).await?;
+        let resp = client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .context(format!("Failed to get object stream s3://{bucket}/{key}"))?;
+
+        Ok(resp.body)
+    }
 }
 
 /// Information about an S3 bucket
