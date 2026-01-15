@@ -32,27 +32,28 @@ impl ArchiveHandler for TarHandler {
         bucket: &str,
         key: &str,
     ) -> Result<ArchiveIndex> {
-        // Get streaming byte stream from S3
-        let byte_stream = s3_client.get_object_stream(bucket, key).await?;
-
-        // Convert ByteStream to AsyncRead
-        let reader = byte_stream.into_async_read();
-
-        // Wrap reader based on archive type
         let entries = match self.archive_type {
             ArchiveType::Tar => {
-                // Uncompressed tar - stream directly
-                stream_list_tar(reader).await?
+                // Uncompressed tar - use range requests to skip file content without downloading
+                stream_list_tar_with_range_requests(s3_client, bucket, key).await?
             }
-            ArchiveType::TarGz => {
-                // Gzip compressed - use streaming decompression
-                let gz = GzipDecoder::new(tokio::io::BufReader::new(reader));
-                stream_list_tar(gz).await?
-            }
-            ArchiveType::TarBz2 => {
-                // Bzip2 compressed - use streaming decompression
-                let bz = BzDecoder::new(tokio::io::BufReader::new(reader));
-                stream_list_tar(bz).await?
+            ArchiveType::TarGz | ArchiveType::TarBz2 => {
+                // Compressed archives must be fully downloaded and decompressed
+                // because compression formats like gzip/bzip2 are not seekable
+                let byte_stream = s3_client.get_object_stream(bucket, key).await?;
+                let reader = byte_stream.into_async_read();
+
+                match self.archive_type {
+                    ArchiveType::TarGz => {
+                        let gz = GzipDecoder::new(tokio::io::BufReader::new(reader));
+                        stream_list_tar(gz).await?
+                    }
+                    ArchiveType::TarBz2 => {
+                        let bz = BzDecoder::new(tokio::io::BufReader::new(reader));
+                        stream_list_tar(bz).await?
+                    }
+                    _ => unreachable!(),
+                }
             }
             _ => return Err(anyhow!("Unsupported tar archive type: {:?}", self.archive_type)),
         };
@@ -311,6 +312,85 @@ async fn stream_list_tar<R: AsyncRead + Unpin>(mut r: R) -> Result<HashMap<Strin
         // Skip payload without reading it into memory
         let to_skip = round_up_512(size);
         skip_exact(&mut r, to_skip).await?;
+    }
+
+    Ok(entries)
+}
+
+/// Stream tar headers from S3 using range requests to skip file content
+/// This is more efficient for uncompressed tar files as it only downloads headers
+async fn stream_list_tar_with_range_requests(
+    s3_client: &S3Client,
+    bucket: &str,
+    key: &str,
+) -> Result<HashMap<String, ArchiveEntry>> {
+    let mut entries = HashMap::new();
+    let mut current_offset = 0u64;
+    let mut zero_blocks = 0u8;
+
+    loop {
+        // Read next 512-byte header using range request
+        let header_bytes = s3_client
+            .get_object_range(bucket, key, current_offset, TAR_BLOCK as u64)
+            .await;
+
+        // Handle end of file
+        let header_bytes = match header_bytes {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                // EOF - if we have entries, that's ok
+                if !entries.is_empty() {
+                    break;
+                }
+                return Err(anyhow!("Failed to read tar header at offset {}", current_offset));
+            }
+        };
+
+        // Check if we got a full header
+        if header_bytes.len() < TAR_BLOCK {
+            break;
+        }
+
+        let header: [u8; TAR_BLOCK] = header_bytes.as_ref()[..TAR_BLOCK]
+            .try_into()
+            .map_err(|_| anyhow!("Failed to convert header bytes"))?;
+
+        // Check for end-of-archive marker (two consecutive zero blocks)
+        if header.iter().all(|&b| b == 0) {
+            zero_blocks += 1;
+            if zero_blocks >= 2 {
+                break;
+            }
+            current_offset += TAR_BLOCK as u64;
+            continue;
+        } else {
+            zero_blocks = 0;
+        }
+
+        // Parse header fields
+        let name = parse_cstr(&header[0..100]);
+        let prefix = parse_cstr(&header[345..500]);
+        let path = if !prefix.is_empty() {
+            format!("{}/{}", prefix, name)
+        } else {
+            name
+        };
+
+        let size = parse_octal_u64(&header[124..136])
+            .ok_or_else(|| anyhow!("bad size field for entry {path:?}"))?;
+
+        let typeflag = header[156] as char;
+        let is_dir = typeflag == '5' || path.ends_with('/');
+
+        // Store the entry
+        entries.insert(
+            path.clone(),
+            ArchiveEntry::physical(path, current_offset, size, is_dir),
+        );
+
+        // Move to next header (skip current header + file content)
+        current_offset += TAR_BLOCK as u64; // Header
+        current_offset += round_up_512(size); // File content (padded)
     }
 
     Ok(entries)
