@@ -228,7 +228,7 @@ fn parse_octal_u64(field: &[u8]) -> Option<u64> {
     if s.is_empty() {
         return Some(0);
     }
-    u64::from_str_radix(s.trim_matches(|c: char| c == '\0' || c.is_whitespace()), 8).ok()
+    u64::from_str_radix(&s, 8).ok()
 }
 
 /// Round up to next 512-byte boundary
@@ -237,6 +237,10 @@ fn round_up_512(n: u64) -> u64 {
 }
 
 /// Skip exactly n bytes from an async reader
+/// Note: We use read-and-discard instead of seek because:
+/// 1. Compressed streams (gzip, bzip2) don't support seeking
+/// 2. S3 ByteStream may not support efficient seeking
+/// 3. This works consistently across all archive types
 async fn skip_exact<R: AsyncRead + Unpin>(r: &mut R, mut n: u64) -> Result<()> {
     let mut buf = [0u8; 64 * 1024];
     while n > 0 {
@@ -258,7 +262,10 @@ async fn stream_list_tar<R: AsyncRead + Unpin>(mut r: R) -> Result<HashMap<Strin
     loop {
         // Read next 512-byte header
         if let Err(e) = r.read_exact(&mut header).await {
-            // If we hit EOF, check if we already have entries (incomplete archive is ok)
+            // Handle incomplete archives gracefully:
+            // While tar spec requires two zero blocks at the end, we allow incomplete
+            // archives if we've already found entries. This improves robustness when
+            // dealing with truncated or streaming archives.
             if !entries.is_empty() {
                 break;
             }
