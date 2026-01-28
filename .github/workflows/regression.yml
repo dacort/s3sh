@@ -1,0 +1,159 @@
+name: Regression Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      zip_key:
+        description: 'S3 key for zip test file (overrides repository variable)'
+        required: false
+      targz_key:
+        description: 'S3 key for tar.gz test file (overrides repository variable)'
+        required: false
+
+# Required for OIDC authentication
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  REGRESSION_BUCKET: ${{ vars.REGRESSION_BUCKET }}
+  REGRESSION_ZIP_KEY: ${{ inputs.zip_key || vars.REGRESSION_ZIP_KEY }}
+  REGRESSION_TARGZ_KEY: ${{ inputs.targz_key || vars.REGRESSION_TARGZ_KEY }}
+
+jobs:
+  regression:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    # Only run if bucket is configured
+    if: vars.REGRESSION_BUCKET != ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Verify AWS credentials
+        run: aws sts get-caller-identity
+
+      - name: Run performance tests
+        run: |
+          cargo test --test regression_s3 test_perf -- --ignored --nocapture 2>&1 | tee regression-output.txt
+        env:
+          RUST_BACKTRACE: 1
+
+      - name: Upload test output
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-perf-output
+          path: regression-output.txt
+
+      - name: Parse performance results
+        if: always()
+        run: |
+          echo "## Performance Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Extract key metrics from output
+          if grep -q "ZIP cd" regression-output.txt; then
+            echo "### ZIP Archive Performance" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A 10 "=== ZIP cd Metrics ===" regression-output.txt >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if grep -q "TAR.GZ cd" regression-output.txt; then
+            echo "### TAR.GZ Archive Performance" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A 10 "=== TAR.GZ cd Metrics ===" regression-output.txt >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Show pass/fail summary
+          echo "### Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E "(PASSED|FAILED|ok|FAILED|ignored)" regression-output.txt | tail -20 >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  functionality:
+    name: Functionality Tests
+    runs-on: ubuntu-latest
+    # Only run if bucket is configured
+    if: vars.REGRESSION_BUCKET != ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Run functionality tests
+        run: |
+          cargo test --test regression_s3 test_func -- --ignored --nocapture 2>&1 | tee functionality-output.txt
+        env:
+          RUST_BACKTRACE: 1
+
+      - name: Upload test output
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-func-output
+          path: functionality-output.txt
+
+      - name: Summarize results
+        if: always()
+        run: |
+          echo "## Functionality Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E "(test_func|ok|FAILED)" functionality-output.txt | tail -20 >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  metrics:
+    name: Metrics Verification
+    runs-on: ubuntu-latest
+    if: vars.REGRESSION_BUCKET != ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Run metrics verification tests
+        run: |
+          cargo test --test regression_s3 test_metrics -- --ignored --nocapture
+        env:
+          RUST_BACKTRACE: 1
