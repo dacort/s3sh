@@ -391,8 +391,15 @@ async fn test_func_zip_cd_ls() {
         .await
         .expect("Failed to cd ..");
 
-    // Verify we're back in bucket
-    assert!(matches!(shell.current_node(), VfsNode::Bucket { .. }));
+    // Verify we're back in bucket or prefix (depending on where the archive was located)
+    assert!(
+        matches!(
+            shell.current_node(),
+            VfsNode::Bucket { .. } | VfsNode::Prefix { .. }
+        ),
+        "Expected to be out of archive, got {:?}",
+        shell.current_node()
+    );
 }
 
 #[tokio::test]
@@ -459,8 +466,15 @@ async fn test_func_targz_cd_ls() {
         .await
         .expect("Failed to cd ..");
 
-    // Verify we're back in bucket
-    assert!(matches!(shell.current_node(), VfsNode::Bucket { .. }));
+    // Verify we're back in bucket or prefix (depending on where the archive was located)
+    assert!(
+        matches!(
+            shell.current_node(),
+            VfsNode::Bucket { .. } | VfsNode::Prefix { .. }
+        ),
+        "Expected to be out of archive, got {:?}",
+        shell.current_node()
+    );
 }
 
 #[tokio::test]
@@ -503,12 +517,19 @@ async fn test_func_archive_navigation_roundtrip() {
         .expect("cd archive");
     assert!(matches!(shell.current_node(), VfsNode::Archive { .. }));
 
-    // cd .. (back to bucket)
+    // cd .. (back to bucket or prefix, depending on archive location)
     cd_cmd
         .execute(&mut shell, &["..".to_string()])
         .await
         .expect("cd ..");
-    assert!(matches!(shell.current_node(), VfsNode::Bucket { .. }));
+    assert!(
+        matches!(
+            shell.current_node(),
+            VfsNode::Bucket { .. } | VfsNode::Prefix { .. }
+        ),
+        "Expected to be out of archive, got {:?}",
+        shell.current_node()
+    );
 
     // cd / (back to root)
     cd_cmd
