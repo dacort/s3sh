@@ -478,6 +478,13 @@ impl ZipHandler {
             // Parse general purpose bit flag (offset 8)
             let general_purpose_flag = u16::from_le_bytes([data[pos + 8], data[pos + 9]]);
 
+            // Check for encrypted entries (bit 0) - we don't support this
+            if general_purpose_flag & 0x0001 != 0 {
+                return Err(anyhow!(
+                    "Encrypted ZIP entries (bit 0) are not supported"
+                ));
+            }
+
             // Check for data descriptor (bit 3) - we don't support this
             if general_purpose_flag & 0x0008 != 0 {
                 return Err(anyhow!(
