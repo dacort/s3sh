@@ -56,6 +56,8 @@ pub enum EntryType {
         compressed_size: u64,
         /// Compression method (0 = stored, 8 = deflate)
         compression_method: u16,
+        /// CRC-32 checksum for data integrity verification
+        crc32: u32,
     },
     /// Virtual entry for Parquet files
     #[cfg(feature = "parquet")]
@@ -107,6 +109,7 @@ impl ArchiveEntry {
         local_header_offset: u64,
         compressed_size: u64,
         compression_method: u16,
+        crc32: u32,
     ) -> Self {
         Self {
             path,
@@ -116,6 +119,7 @@ impl ArchiveEntry {
                 local_header_offset,
                 compressed_size,
                 compression_method,
+                crc32,
             },
         }
     }
