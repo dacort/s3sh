@@ -150,6 +150,15 @@ impl ArchiveHandler for ZipHandler {
             ));
         }
 
+        // Validate compressed size to prevent excessive memory usage during download
+        if compressed_size > MAX_UNCOMPRESSED_SIZE {
+            return Err(anyhow!(
+                "Compressed data too large: {} bytes (max allowed: {} bytes). This may be a malicious ZIP file.",
+                compressed_size,
+                MAX_UNCOMPRESSED_SIZE
+            ));
+        }
+
         // Read just the compressed data
         let compressed_data = if compressed_size > 0 {
             stream
