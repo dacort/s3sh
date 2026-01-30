@@ -267,6 +267,34 @@ No authentication required. The Source Coop provider accesses public datasets an
 - **Streaming** - Large files are streamed, not loaded into memory
 - **Parallel Listings** - Tab completion fetches directory contents on-demand
 
+## Development
+
+### Running Regression Tests
+
+The regression test suite validates performance and functionality against real S3 data. Configure the following environment variables:
+
+```bash
+export REGRESSION_BUCKET=your-bucket-name
+export REGRESSION_ZIP_KEY=path/to/test-file.zip
+export REGRESSION_TARGZ_KEY=path/to/test-file.tar.gz
+```
+
+Run the tests:
+```bash
+# Run all regression tests
+cargo test --test regression_s3 -- --ignored --nocapture
+
+# Run specific test categories
+cargo test --test regression_s3 test_perf -- --ignored --nocapture     # Performance tests
+cargo test --test regression_s3 test_func -- --ignored --nocapture     # Functionality tests
+cargo test --test regression_s3 test_metrics -- --ignored --nocapture  # Metrics validation
+```
+
+The tests verify:
+- **Performance** - Archive indexing completes within expected thresholds
+- **Functionality** - Navigation (`cd`, `ls`, `cat`) works correctly in archives
+- **Metrics** - Bytes transferred and request counts are accurately tracked
+
 ## Contributing
 Contributions are welcome! Please feel free to submit issues or pull requests.
 

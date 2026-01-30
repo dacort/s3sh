@@ -3,6 +3,9 @@ use aws_sdk_s3::Client;
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
+
+use super::metrics::S3Metrics;
 
 /// Wrapper around AWS S3 client with cross-region support
 pub struct S3Client {
@@ -12,6 +15,8 @@ pub struct S3Client {
     regional_clients: Arc<RwLock<HashMap<String, Client>>>,
     /// Disable cross-region bucket support (for custom endpoints)
     disable_cross_region: bool,
+    /// Optional metrics collector
+    metrics: Option<Arc<S3Metrics>>,
 }
 
 impl S3Client {
@@ -29,6 +34,7 @@ impl S3Client {
             default_region,
             regional_clients: Arc::new(RwLock::new(HashMap::new())),
             disable_cross_region: false,
+            metrics: None,
         })
     }
 
@@ -48,7 +54,29 @@ impl S3Client {
             default_region: region,
             regional_clients: Arc::new(RwLock::new(HashMap::new())),
             disable_cross_region,
+            metrics: None,
         }
+    }
+
+    /// Create an S3Client with metrics collection enabled
+    pub fn from_client_with_metrics(
+        client: Client,
+        region: String,
+        disable_cross_region: bool,
+        metrics: Option<Arc<S3Metrics>>,
+    ) -> Self {
+        S3Client {
+            default_client: client,
+            default_region: region,
+            regional_clients: Arc::new(RwLock::new(HashMap::new())),
+            disable_cross_region,
+            metrics,
+        }
+    }
+
+    /// Get the metrics collector if enabled
+    pub fn metrics(&self) -> Option<&Arc<S3Metrics>> {
+        self.metrics.as_ref()
     }
 
     /// Get or create a client for a specific region
@@ -262,6 +290,8 @@ impl S3Client {
         offset: u64,
         length: u64,
     ) -> Result<Bytes> {
+        let start = Instant::now();
+
         let client = self.get_client_for_bucket(bucket).await?;
         let range = format!("bytes={}-{}", offset, offset + length - 1);
 
@@ -280,6 +310,11 @@ impl S3Client {
             .await
             .context("Failed to read object body")?
             .into_bytes();
+
+        // Record metrics if enabled
+        if let Some(metrics) = &self.metrics {
+            metrics.record_request(bytes.len() as u64, start.elapsed(), offset, length);
+        }
 
         Ok(bytes)
     }
