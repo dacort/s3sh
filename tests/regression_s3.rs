@@ -223,7 +223,7 @@ async fn test_perf_cd_into_zip() {
     assert!(
         elapsed < thresholds::ZIP_CD_MAX,
         "ZIP cd took {:.2?}, expected < {:?}. \
-         Bytes transferred: {} in {} requests",
+            Bytes transferred: {} in {} requests",
         elapsed,
         thresholds::ZIP_CD_MAX,
         metrics.total_bytes(),
