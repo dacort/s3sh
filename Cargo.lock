@@ -2795,6 +2795,7 @@ dependencies = [
  "chrono",
  "clap",
  "colored",
+ "crc32fast",
  "dirs",
  "flate2",
  "futures",
