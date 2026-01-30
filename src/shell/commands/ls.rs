@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use colored::*;
 use std::sync::Arc;
 
-use super::{Command, ShellState};
 use super::output::print_line;
+use super::{Command, ShellState};
 use crate::archive::ArchiveHandler;
 #[cfg(feature = "parquet")]
 use crate::archive::ParquetHandler;

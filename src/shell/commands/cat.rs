@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use super::{Command, ShellState};
 use super::output::{print_line, print_str};
+use super::{Command, ShellState};
 use crate::archive::ArchiveHandler;
 #[cfg(feature = "parquet")]
 use crate::archive::ParquetHandler;
