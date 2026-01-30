@@ -460,6 +460,13 @@ async fn test_func_targz_cd_ls() {
         metrics.request_count()
     );
 
+    // ls should not require additional S3 requests (index is cached)
+    assert_eq!(
+        metrics.request_count(),
+        0,
+        "ls should not make additional S3 requests"
+    );
+
     // cd .. back out
     cd_cmd
         .execute(&mut shell, &["..".to_string()])
