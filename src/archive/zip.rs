@@ -190,7 +190,7 @@ impl ArchiveHandler for ZipHandler {
         let mut crc = Crc::new();
         crc.update(&decompressed);
         let computed_crc = crc.sum();
-        
+
         if computed_crc != crc32 {
             return Err(anyhow!(
                 "CRC-32 checksum mismatch for {}: expected 0x{:08x}, got 0x{:08x}",
