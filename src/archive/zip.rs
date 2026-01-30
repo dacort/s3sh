@@ -125,7 +125,12 @@ impl ArchiveHandler for ZipHandler {
                     compressed_size,
                     compression_method,
                     crc32,
-                } => (*local_header_offset, *compressed_size, *compression_method, *crc32),
+                } => (
+                    *local_header_offset,
+                    *compressed_size,
+                    *compression_method,
+                    *crc32,
+                ),
                 _ => {
                     return Err(anyhow!(
                         "Invalid entry type for ZIP extraction: {file_path}"
@@ -715,7 +720,12 @@ mod tests {
 
         let result = ZipHandler::parse_central_directory(&data, 1000);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid local header offset"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid local header offset")
+        );
     }
 
     #[test]
