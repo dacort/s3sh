@@ -34,6 +34,31 @@ const MAX_DECOMPRESSED_SIZE: u64 = 1024 * 1024 * 1024;
 /// Maximum compression ratio allowed (1000:1) to detect zip bombs
 const MAX_COMPRESSION_RATIO: u64 = 1000;
 
+/// ZIP signatures
+const EOCD_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
+const CDFH_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
+const LOCAL_HEADER_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
+
+/// General purpose flag bits
+const FLAG_ENCRYPTED: u16 = 0x0001;
+const FLAG_DATA_DESCRIPTOR: u16 = 0x0008;
+const FLAG_UTF8_FILENAME: u16 = 0x0800;
+
+/// Read a little-endian u16 from a byte slice at the given offset
+fn read_u16_le(data: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes([data[offset], data[offset + 1]])
+}
+
+/// Read a little-endian u32 from a byte slice at the given offset
+fn read_u32_le(data: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ])
+}
+
 pub struct ZipHandler;
 
 /// Information extracted from the End of Central Directory record
@@ -178,14 +203,14 @@ impl ArchiveHandler for ZipHandler {
 
         // Verify local header signature
         if local_header.len() < LOCAL_HEADER_MIN_SIZE
-            || !local_header.starts_with(&[0x50, 0x4b, 0x03, 0x04])
+            || !local_header.starts_with(&LOCAL_HEADER_SIGNATURE)
         {
             return Err(anyhow!("Invalid local file header signature"));
         }
 
         // Get filename length (offset 26) and extra field length (offset 28)
-        let filename_len = u16::from_le_bytes([local_header[26], local_header[27]]) as u64;
-        let extra_len = u16::from_le_bytes([local_header[28], local_header[29]]) as u64;
+        let filename_len = read_u16_le(&local_header, 26) as u64;
+        let extra_len = read_u16_le(&local_header, 28) as u64;
 
         // Calculate actual data offset with overflow protection
         let data_offset = local_header_offset
@@ -388,49 +413,44 @@ impl ZipHandler {
     /// Find the End of Central Directory record in the buffer.
     /// Returns information about the central directory location.
     fn find_eocd(data: &[u8]) -> Result<EocdInfo> {
-        // EOCD signature: 0x06054b50 (little endian)
-        const EOCD_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
-
         // Search backwards from the end for the EOCD signature
         for i in (0..=data.len().saturating_sub(MIN_EOCD_SIZE)).rev() {
-            if data[i..].starts_with(&EOCD_SIGNATURE) {
-                let eocd = &data[i..];
-
-                if eocd.len() < MIN_EOCD_SIZE {
-                    continue;
-                }
-
-                // Check for multi-disk archives (not supported)
-                // Disk number (offset 4) and disk with CD start (offset 6)
-                let disk_number = u16::from_le_bytes([eocd[4], eocd[5]]);
-                let disk_with_cd = u16::from_le_bytes([eocd[6], eocd[7]]);
-
-                if disk_number != 0 || disk_with_cd != 0 {
-                    return Err(anyhow!(
-                        "Multi-disk ZIP archives are not supported (disk {}, CD disk {})",
-                        disk_number,
-                        disk_with_cd
-                    ));
-                }
-
-                // Parse sizes as raw u32 first to check for ZIP64
-                let central_dir_size_raw =
-                    u32::from_le_bytes([eocd[12], eocd[13], eocd[14], eocd[15]]);
-                let central_dir_offset_raw =
-                    u32::from_le_bytes([eocd[16], eocd[17], eocd[18], eocd[19]]);
-
-                // ZIP64 uses 0xFFFFFFFF as a placeholder
-                if central_dir_size_raw == u32::MAX || central_dir_offset_raw == u32::MAX {
-                    return Err(anyhow!(
-                        "ZIP64 archives are not supported (central directory fields use ZIP64 placeholder values)"
-                    ));
-                }
-
-                return Ok(EocdInfo {
-                    central_dir_offset: central_dir_offset_raw as u64,
-                    central_dir_size: central_dir_size_raw as u64,
-                });
+            if !data[i..].starts_with(&EOCD_SIGNATURE) {
+                continue;
             }
+
+            let eocd = &data[i..];
+            if eocd.len() < MIN_EOCD_SIZE {
+                continue;
+            }
+
+            // Check for multi-disk archives (not supported)
+            let disk_number = read_u16_le(eocd, 4);
+            let disk_with_cd = read_u16_le(eocd, 6);
+
+            if disk_number != 0 || disk_with_cd != 0 {
+                return Err(anyhow!(
+                    "Multi-disk ZIP archives are not supported (disk {}, CD disk {})",
+                    disk_number,
+                    disk_with_cd
+                ));
+            }
+
+            // Parse sizes as raw u32 first to check for ZIP64
+            let central_dir_size_raw = read_u32_le(eocd, 12);
+            let central_dir_offset_raw = read_u32_le(eocd, 16);
+
+            // ZIP64 uses 0xFFFFFFFF as a placeholder
+            if central_dir_size_raw == u32::MAX || central_dir_offset_raw == u32::MAX {
+                return Err(anyhow!(
+                    "ZIP64 archives are not supported (central directory fields use ZIP64 placeholder values)"
+                ));
+            }
+
+            return Ok(EocdInfo {
+                central_dir_offset: central_dir_offset_raw as u64,
+                central_dir_size: central_dir_size_raw as u64,
+            });
         }
 
         Err(anyhow!("Could not find End of Central Directory record"))
@@ -463,67 +483,34 @@ impl ZipHandler {
         data: &[u8],
         archive_size: u64,
     ) -> Result<HashMap<String, ArchiveEntry>> {
-        const CDFH_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
-
         let mut entries = HashMap::new();
         let mut pos = 0;
 
         while pos + CDFH_MIN_SIZE <= data.len() {
             // Check for CDFH signature
             if !data[pos..].starts_with(&CDFH_SIGNATURE) {
-                // Reached end of central directory entries
                 break;
             }
 
             // Parse general purpose bit flag (offset 8)
-            let general_purpose_flag = u16::from_le_bytes([data[pos + 8], data[pos + 9]]);
+            let flags = read_u16_le(data, pos + 8);
 
-            // Check for encrypted entries (bit 0) - we don't support this
-            if general_purpose_flag & 0x0001 != 0 {
-                return Err(anyhow!("Encrypted ZIP entries (bit 0) are not supported"));
+            // Check for unsupported features
+            if flags & FLAG_ENCRYPTED != 0 {
+                return Err(anyhow!("Encrypted ZIP entries are not supported"));
             }
-
-            // Check for data descriptor (bit 3) - we don't support this
-            if general_purpose_flag & 0x0008 != 0 {
+            if flags & FLAG_DATA_DESCRIPTOR != 0 {
                 return Err(anyhow!(
-                    "ZIP entries with data descriptors (bit 3 set) are not supported"
+                    "ZIP entries with data descriptors are not supported"
                 ));
             }
 
-            // Parse compression method (offset 10)
-            let compression_method = u16::from_le_bytes([data[pos + 10], data[pos + 11]]);
-
-            // Parse CRC-32 (offset 16)
-            let crc32 = u32::from_le_bytes([
-                data[pos + 16],
-                data[pos + 17],
-                data[pos + 18],
-                data[pos + 19],
-            ]);
-
-            // Parse compressed size (offset 20) - check for ZIP64
-            let compressed_size_raw = u32::from_le_bytes([
-                data[pos + 20],
-                data[pos + 21],
-                data[pos + 22],
-                data[pos + 23],
-            ]);
-
-            // Parse uncompressed size (offset 24) - check for ZIP64
-            let uncompressed_size_raw = u32::from_le_bytes([
-                data[pos + 24],
-                data[pos + 25],
-                data[pos + 26],
-                data[pos + 27],
-            ]);
-
-            // Parse local header offset (offset 42) - check for ZIP64
-            let local_header_offset_raw = u32::from_le_bytes([
-                data[pos + 42],
-                data[pos + 43],
-                data[pos + 44],
-                data[pos + 45],
-            ]);
+            // Parse fixed-position fields
+            let compression_method = read_u16_le(data, pos + 10);
+            let crc32 = read_u32_le(data, pos + 16);
+            let compressed_size_raw = read_u32_le(data, pos + 20);
+            let uncompressed_size_raw = read_u32_le(data, pos + 24);
+            let local_header_offset_raw = read_u32_le(data, pos + 42);
 
             // Check for ZIP64 placeholder values
             if compressed_size_raw == u32::MAX
@@ -548,10 +535,10 @@ impl ZipHandler {
                 ));
             }
 
-            // Parse lengths (offsets 28, 30, 32) with overflow protection
-            let filename_len = u16::from_le_bytes([data[pos + 28], data[pos + 29]]) as usize;
-            let extra_len = u16::from_le_bytes([data[pos + 30], data[pos + 31]]) as usize;
-            let comment_len = u16::from_le_bytes([data[pos + 32], data[pos + 33]]) as usize;
+            // Parse variable field lengths
+            let filename_len = read_u16_le(data, pos + 28) as usize;
+            let extra_len = read_u16_le(data, pos + 30) as usize;
+            let comment_len = read_u16_le(data, pos + 32) as usize;
 
             // Calculate total entry size with overflow protection
             let total_entry_size = CDFH_MIN_SIZE
@@ -578,14 +565,10 @@ impl ZipHandler {
 
             // Extract filename with proper encoding handling
             let filename_bytes = &data[pos + CDFH_MIN_SIZE..pos + CDFH_MIN_SIZE + filename_len];
-            let is_utf8 = (general_purpose_flag & (1 << 11)) != 0;
-
-            let filename = if is_utf8 {
-                // Filenames are explicitly marked as UTF-8
+            let filename = if flags & FLAG_UTF8_FILENAME != 0 {
                 String::from_utf8_lossy(filename_bytes).to_string()
             } else {
-                // Legacy encoding - preserve byte values as chars
-                // This handles CP437 and similar single-byte encodings
+                // Legacy encoding (CP437) - preserve byte values as chars
                 filename_bytes.iter().map(|&b| b as char).collect()
             };
 
@@ -622,13 +605,9 @@ mod tests {
         let mut data = vec![0u8; 100];
         let eocd_pos = 50;
 
-        // EOCD signature
-        data[eocd_pos..eocd_pos + 4].copy_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
-        // Disk numbers (must be 0)
-        data[eocd_pos + 4..eocd_pos + 8].copy_from_slice(&[0, 0, 0, 0]);
-        // Central directory size
+        data[eocd_pos..eocd_pos + 4].copy_from_slice(&EOCD_SIGNATURE);
+        data[eocd_pos + 4..eocd_pos + 8].copy_from_slice(&[0, 0, 0, 0]); // disk numbers = 0
         data[eocd_pos + 12..eocd_pos + 16].copy_from_slice(&1000u32.to_le_bytes());
-        // Central directory offset
         data[eocd_pos + 16..eocd_pos + 20].copy_from_slice(&5000u32.to_le_bytes());
 
         let result = ZipHandler::find_eocd(&data);
@@ -642,10 +621,8 @@ mod tests {
     fn test_find_eocd_rejects_multi_disk() {
         let mut data = vec![0u8; MIN_EOCD_SIZE];
 
-        // EOCD signature
-        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
-        // Non-zero disk number
-        data[4..6].copy_from_slice(&1u16.to_le_bytes());
+        data[0..4].copy_from_slice(&EOCD_SIGNATURE);
+        data[4..6].copy_from_slice(&1u16.to_le_bytes()); // non-zero disk number
 
         let result = ZipHandler::find_eocd(&data);
         assert!(result.is_err());
@@ -656,12 +633,9 @@ mod tests {
     fn test_find_eocd_rejects_zip64() {
         let mut data = vec![0u8; MIN_EOCD_SIZE];
 
-        // EOCD signature
-        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
-        // Disk numbers = 0
-        data[4..8].copy_from_slice(&[0, 0, 0, 0]);
-        // Central directory size = 0xFFFFFFFF (ZIP64 marker)
-        data[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+        data[0..4].copy_from_slice(&EOCD_SIGNATURE);
+        data[4..8].copy_from_slice(&[0, 0, 0, 0]); // disk numbers = 0
+        data[12..16].copy_from_slice(&u32::MAX.to_le_bytes()); // ZIP64 marker
 
         let result = ZipHandler::find_eocd(&data);
         assert!(result.is_err());
@@ -691,10 +665,8 @@ mod tests {
     fn test_parse_central_directory_rejects_data_descriptor() {
         let mut data = vec![0u8; 100];
 
-        // CDFH signature
-        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
-        // General purpose flag with bit 3 set (data descriptor)
-        data[8..10].copy_from_slice(&0x0008u16.to_le_bytes());
+        data[0..4].copy_from_slice(&CDFH_SIGNATURE);
+        data[8..10].copy_from_slice(&FLAG_DATA_DESCRIPTOR.to_le_bytes());
 
         let result = ZipHandler::parse_central_directory(&data, 10000);
         assert!(result.is_err());
@@ -705,22 +677,16 @@ mod tests {
     fn test_parse_central_directory_validates_offset() {
         let mut data = vec![0u8; 100];
 
-        // CDFH signature
-        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
-        // No data descriptor flag
-        data[8..10].copy_from_slice(&0u16.to_le_bytes());
-        // Compression, CRC, sizes
-        data[10..12].copy_from_slice(&8u16.to_le_bytes());
-        data[16..20].copy_from_slice(&0u32.to_le_bytes());
-        data[20..24].copy_from_slice(&100u32.to_le_bytes());
-        data[24..28].copy_from_slice(&200u32.to_le_bytes());
-        // Lengths
-        data[28..30].copy_from_slice(&4u16.to_le_bytes());
-        data[30..32].copy_from_slice(&0u16.to_le_bytes());
-        data[32..34].copy_from_slice(&0u16.to_le_bytes());
-        // Local header offset beyond archive size
-        data[42..46].copy_from_slice(&50000u32.to_le_bytes());
-        // Filename
+        data[0..4].copy_from_slice(&CDFH_SIGNATURE);
+        data[8..10].copy_from_slice(&0u16.to_le_bytes()); // no special flags
+        data[10..12].copy_from_slice(&COMPRESSION_DEFLATE.to_le_bytes());
+        data[16..20].copy_from_slice(&0u32.to_le_bytes()); // CRC
+        data[20..24].copy_from_slice(&100u32.to_le_bytes()); // compressed size
+        data[24..28].copy_from_slice(&200u32.to_le_bytes()); // uncompressed size
+        data[28..30].copy_from_slice(&4u16.to_le_bytes()); // filename length
+        data[30..32].copy_from_slice(&0u16.to_le_bytes()); // extra length
+        data[32..34].copy_from_slice(&0u16.to_le_bytes()); // comment length
+        data[42..46].copy_from_slice(&50000u32.to_le_bytes()); // offset beyond archive
         data[46..50].copy_from_slice(b"test");
 
         let result = ZipHandler::parse_central_directory(&data, 1000);
@@ -737,27 +703,16 @@ mod tests {
     fn test_parse_central_directory_single_entry() {
         let mut data = vec![0u8; 100];
 
-        // CDFH signature
-        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
-        // General purpose flag (no special bits)
-        data[8..10].copy_from_slice(&0u16.to_le_bytes());
-        // Compression method: deflate = 8
-        data[10..12].copy_from_slice(&8u16.to_le_bytes());
-        // CRC-32
-        data[16..20].copy_from_slice(&0x12345678u32.to_le_bytes());
-        // Compressed size: 500
-        data[20..24].copy_from_slice(&500u32.to_le_bytes());
-        // Uncompressed size: 1000
-        data[24..28].copy_from_slice(&1000u32.to_le_bytes());
-        // Filename length: 8
-        data[28..30].copy_from_slice(&8u16.to_le_bytes());
-        // Extra field length: 0
-        data[30..32].copy_from_slice(&0u16.to_le_bytes());
-        // Comment length: 0
-        data[32..34].copy_from_slice(&0u16.to_le_bytes());
-        // Local header offset: 100
-        data[42..46].copy_from_slice(&100u32.to_le_bytes());
-        // Filename: "test.txt"
+        data[0..4].copy_from_slice(&CDFH_SIGNATURE);
+        data[8..10].copy_from_slice(&0u16.to_le_bytes()); // no special flags
+        data[10..12].copy_from_slice(&COMPRESSION_DEFLATE.to_le_bytes());
+        data[16..20].copy_from_slice(&0x12345678u32.to_le_bytes()); // CRC-32
+        data[20..24].copy_from_slice(&500u32.to_le_bytes()); // compressed size
+        data[24..28].copy_from_slice(&1000u32.to_le_bytes()); // uncompressed size
+        data[28..30].copy_from_slice(&8u16.to_le_bytes()); // filename length
+        data[30..32].copy_from_slice(&0u16.to_le_bytes()); // extra length
+        data[32..34].copy_from_slice(&0u16.to_le_bytes()); // comment length
+        data[42..46].copy_from_slice(&100u32.to_le_bytes()); // local header offset
         data[46..54].copy_from_slice(b"test.txt");
 
         let result = ZipHandler::parse_central_directory(&data, 10000);
@@ -791,22 +746,18 @@ mod tests {
     fn test_parse_central_directory_utf8_filename() {
         let mut data = vec![0u8; 100];
 
-        // CDFH signature
-        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
-        // General purpose flag with UTF-8 bit (bit 11) set
-        data[8..10].copy_from_slice(&0x0800u16.to_le_bytes());
-        // Compression, CRC, sizes
-        data[10..12].copy_from_slice(&0u16.to_le_bytes());
-        data[16..20].copy_from_slice(&0u32.to_le_bytes());
-        data[20..24].copy_from_slice(&0u32.to_le_bytes());
-        data[24..28].copy_from_slice(&0u32.to_le_bytes());
-        // Filename length: 9 (日本.txt = 3 UTF-8 chars for 日本 + 4 for .txt)
+        data[0..4].copy_from_slice(&CDFH_SIGNATURE);
+        data[8..10].copy_from_slice(&FLAG_UTF8_FILENAME.to_le_bytes());
+        data[10..12].copy_from_slice(&COMPRESSION_STORED.to_le_bytes());
+        data[16..20].copy_from_slice(&0u32.to_le_bytes()); // CRC
+        data[20..24].copy_from_slice(&0u32.to_le_bytes()); // compressed size
+        data[24..28].copy_from_slice(&0u32.to_le_bytes()); // uncompressed size
         let filename = "日本.txt";
         let filename_bytes = filename.as_bytes();
         data[28..30].copy_from_slice(&(filename_bytes.len() as u16).to_le_bytes());
-        data[30..32].copy_from_slice(&0u16.to_le_bytes());
-        data[32..34].copy_from_slice(&0u16.to_le_bytes());
-        data[42..46].copy_from_slice(&0u32.to_le_bytes());
+        data[30..32].copy_from_slice(&0u16.to_le_bytes()); // extra length
+        data[32..34].copy_from_slice(&0u16.to_le_bytes()); // comment length
+        data[42..46].copy_from_slice(&0u32.to_le_bytes()); // local header offset
         data[46..46 + filename_bytes.len()].copy_from_slice(filename_bytes);
 
         let result = ZipHandler::parse_central_directory(&data, 10000);
