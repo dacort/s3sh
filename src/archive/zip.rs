@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use bytes::Bytes;
 use flate2::read::DeflateDecoder;
+use flate2::Crc;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
@@ -97,12 +98,13 @@ impl ArchiveHandler for ZipHandler {
         }
 
         // Extract ZIP-specific metadata
-        let (local_header_offset, compressed_size, compression_method) = match &entry.entry_type {
+        let (local_header_offset, compressed_size, compression_method, crc32) = match &entry.entry_type {
             EntryType::ZipEntry {
                 local_header_offset,
                 compressed_size,
                 compression_method,
-            } => (*local_header_offset, *compressed_size, *compression_method),
+                crc32,
+            } => (*local_header_offset, *compressed_size, *compression_method, *crc32),
             _ => {
                 return Err(anyhow!(
                     "Invalid entry type for ZIP extraction: {file_path}"
@@ -183,6 +185,20 @@ impl ArchiveHandler for ZipHandler {
                 ));
             }
         };
+
+        // Verify CRC-32 checksum
+        let mut crc = Crc::new();
+        crc.update(&decompressed);
+        let computed_crc = crc.sum();
+        
+        if computed_crc != crc32 {
+            return Err(anyhow!(
+                "CRC-32 checksum mismatch for {}: expected 0x{:08x}, got 0x{:08x}",
+                file_path,
+                crc32,
+                computed_crc
+            ));
+        }
 
         Ok(Bytes::from(decompressed))
     }
@@ -338,6 +354,14 @@ impl ZipHandler {
             // Parse compression method (offset 10)
             let compression_method = u16::from_le_bytes([data[pos + 10], data[pos + 11]]);
 
+            // Parse CRC-32 (offset 16)
+            let crc32 = u32::from_le_bytes([
+                data[pos + 16],
+                data[pos + 17],
+                data[pos + 18],
+                data[pos + 19],
+            ]);
+
             // Parse compressed size (offset 20)
             let compressed_size = u32::from_le_bytes([
                 data[pos + 20],
@@ -410,6 +434,7 @@ impl ZipHandler {
                 local_header_offset,
                 compressed_size,
                 compression_method,
+                crc32,
             );
 
             entries.insert(filename, entry);
@@ -481,6 +506,9 @@ mod tests {
         // Compression method (offset 10): deflate = 8
         data[10..12].copy_from_slice(&8u16.to_le_bytes());
 
+        // CRC-32 (offset 16): 0x12345678
+        data[16..20].copy_from_slice(&0x12345678u32.to_le_bytes());
+
         // Compressed size (offset 20): 500
         data[20..24].copy_from_slice(&500u32.to_le_bytes());
 
@@ -517,11 +545,13 @@ mod tests {
             local_header_offset,
             compressed_size,
             compression_method,
+            crc32,
         } = &entry.entry_type
         {
             assert_eq!(*local_header_offset, 100);
             assert_eq!(*compressed_size, 500);
             assert_eq!(*compression_method, 8);
+            assert_eq!(*crc32, 0x12345678);
         } else {
             panic!("Expected ZipEntry type");
         }
@@ -536,6 +566,9 @@ mod tests {
 
         // Compression method: stored
         data[10..12].copy_from_slice(&0u16.to_le_bytes());
+
+        // CRC-32 (offset 16): 0 for directories
+        data[16..20].copy_from_slice(&0u32.to_le_bytes());
 
         // Sizes: 0
         data[20..24].copy_from_slice(&0u32.to_le_bytes());
