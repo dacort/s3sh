@@ -39,7 +39,7 @@ impl ArchiveHandler for TarHandler {
         let reader = byte_stream.into_async_read();
 
         // Wrap reader based on archive type
-        let entries = match self.archive_type {
+        let mut entries = match self.archive_type {
             ArchiveType::Tar => {
                 // Uncompressed tar - stream directly
                 stream_list_tar(reader).await?
@@ -56,6 +56,55 @@ impl ArchiveHandler for TarHandler {
             }
             _ => return Err(anyhow!("Unsupported tar archive type: {:?}", self.archive_type)),
         };
+
+        // Add virtual directory entries for any implied directories
+        // Many tar files don't include explicit directory entries, only file entries
+        let mut virtual_dirs = std::collections::HashSet::new();
+
+        // Collect all directory paths that should exist based on file paths
+        for (path, entry) in &entries {
+            // For files, only process parent directories (not the file itself)
+            // For directories, they already end with '/' so we process their parents
+            let path_to_process = if entry.is_dir {
+                // Directory paths end with '/', strip it to get the dir name
+                path.trim_end_matches('/')
+            } else {
+                // For files, get the parent path
+                if let Some(last_slash) = path.rfind('/') {
+                    &path[..last_slash]
+                } else {
+                    // File is at root, no parent directories to add
+                    continue;
+                }
+            };
+
+            // Now build all parent directory paths
+            let mut current_path = String::new();
+            for component in path_to_process.split('/') {
+                if component.is_empty() {
+                    continue;
+                }
+                if !current_path.is_empty() {
+                    current_path.push('/');
+                }
+                current_path.push_str(component);
+                let dir_path = format!("{}/", current_path);
+
+                // Only add if not already in entries
+                if !entries.contains_key(&dir_path) {
+                    virtual_dirs.insert(dir_path);
+                }
+            }
+        }
+
+        // Add virtual directory entries to the index
+        let virtual_count = virtual_dirs.len();
+        for dir_path in virtual_dirs {
+            entries.insert(
+                dir_path.clone(),
+                ArchiveEntry::physical(dir_path, 0, 0, true),
+            );
+        }
 
         Ok(ArchiveIndex {
             entries,
