@@ -480,9 +480,7 @@ impl ZipHandler {
 
             // Check for encrypted entries (bit 0) - we don't support this
             if general_purpose_flag & 0x0001 != 0 {
-                return Err(anyhow!(
-                    "Encrypted ZIP entries (bit 0) are not supported"
-                ));
+                return Err(anyhow!("Encrypted ZIP entries (bit 0) are not supported"));
             }
 
             // Check for data descriptor (bit 3) - we don't support this
