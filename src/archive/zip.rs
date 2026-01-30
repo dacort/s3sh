@@ -148,7 +148,26 @@ impl ArchiveHandler for ZipHandler {
 
         // Decompress based on compression method
         let decompressed = match compression_method {
-            COMPRESSION_STORED => compressed_data.to_vec(),
+            COMPRESSION_STORED => {
+                // For stored entries, compressed and uncompressed sizes must match.
+                if compressed_size != entry.size {
+                    return Err(anyhow!(
+                        "Invalid ZIP entry: stored file has mismatched sizes (compressed_size={}, entry.size={})",
+                        compressed_size,
+                        entry.size
+                    ));
+                }
+
+                if compressed_data.len() as u64 != compressed_size {
+                    return Err(anyhow!(
+                        "Invalid ZIP entry: stored file data length ({}) does not match expected size ({})",
+                        compressed_data.len(),
+                        compressed_size
+                    ));
+                }
+
+                compressed_data.to_vec()
+            }
             COMPRESSION_DEFLATE => {
                 let mut decoder = DeflateDecoder::new(&compressed_data[..]);
                 let mut decompressed = Vec::with_capacity(entry.size as usize);
