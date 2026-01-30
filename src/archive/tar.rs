@@ -1,11 +1,11 @@
 use anyhow::{Context, Result, anyhow};
+use async_compression::tokio::bufread::{BzDecoder, GzipDecoder};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use async_compression::tokio::bufread::{GzipDecoder, BzDecoder};
 
 use crate::s3::{S3Client, S3Stream};
 use crate::vfs::{ArchiveEntry, ArchiveIndex, ArchiveType};
@@ -54,7 +54,12 @@ impl ArchiveHandler for TarHandler {
                 let bz = BzDecoder::new(tokio::io::BufReader::new(reader));
                 stream_list_tar(bz).await?
             }
-            _ => return Err(anyhow!("Unsupported tar archive type: {:?}", self.archive_type)),
+            _ => {
+                return Err(anyhow!(
+                    "Unsupported tar archive type: {:?}",
+                    self.archive_type
+                ));
+            }
         };
 
         // Add virtual directory entries for any implied directories
@@ -281,7 +286,7 @@ fn parse_octal_u64(field: &[u8]) -> Option<u64> {
 
 /// Round up to next 512-byte boundary
 fn round_up_512(n: u64) -> u64 {
-    if n == 0 { 0 } else { ((n + 511) / 512) * 512 }
+    if n == 0 { 0 } else { n.div_ceil(512) * 512 }
 }
 
 /// Skip exactly n bytes from an async reader
@@ -293,7 +298,8 @@ async fn skip_exact<R: AsyncRead + Unpin>(r: &mut R, mut n: u64) -> Result<()> {
     let mut buf = [0u8; 64 * 1024];
     while n > 0 {
         let want = std::cmp::min(n as usize, buf.len());
-        r.read_exact(&mut buf[..want]).await
+        r.read_exact(&mut buf[..want])
+            .await
             .map_err(|e| anyhow!("EOF while skipping tar payload: {e}"))?;
         n -= want as u64;
     }
@@ -334,10 +340,10 @@ async fn stream_list_tar<R: AsyncRead + Unpin>(mut r: R) -> Result<HashMap<Strin
         // Parse header fields
         let name = parse_cstr(&header[0..100]);
         let prefix = parse_cstr(&header[345..500]);
-        let path = if !prefix.is_empty() { 
-            format!("{}/{}", prefix, name) 
-        } else { 
-            name 
+        let path = if !prefix.is_empty() {
+            format!("{}/{}", prefix, name)
+        } else {
+            name
         };
 
         let size = parse_octal_u64(&header[124..136])
@@ -372,10 +378,10 @@ mod tests {
     fn test_parse_cstr() {
         let field = b"test.txt\0\0\0\0";
         assert_eq!(parse_cstr(field), "test.txt");
-        
+
         let field = b"test\0";
         assert_eq!(parse_cstr(field), "test");
-        
+
         let field = b"\0\0\0\0";
         assert_eq!(parse_cstr(field), "");
     }
@@ -385,15 +391,15 @@ mod tests {
         // Standard octal number
         let field = b"0000644\0";
         assert_eq!(parse_octal_u64(field), Some(420));
-        
+
         // Empty field
         let field = b"\0\0\0\0";
         assert_eq!(parse_octal_u64(field), Some(0));
-        
+
         // File size example (100 bytes)
         let field = b"0000144\0";
         assert_eq!(parse_octal_u64(field), Some(100));
-        
+
         // Large file size (1MB = 1048576 bytes = 0o4000000)
         let field = b"04000000\0";
         assert_eq!(parse_octal_u64(field), Some(1048576));
@@ -550,8 +556,12 @@ mod tests {
         assert_eq!(results.len(), 2);
 
         // Find the directory and file
-        let has_themes = results.iter().any(|e| e.path == "gallery2/themes/" && e.is_dir);
-        let has_index = results.iter().any(|e| e.path == "gallery2/index.php" && !e.is_dir);
+        let has_themes = results
+            .iter()
+            .any(|e| e.path == "gallery2/themes/" && e.is_dir);
+        let has_index = results
+            .iter()
+            .any(|e| e.path == "gallery2/index.php" && !e.is_dir);
         assert!(has_themes, "Should have gallery2/themes/ directory");
         assert!(has_index, "Should have gallery2/index.php file");
     }
