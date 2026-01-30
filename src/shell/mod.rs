@@ -111,17 +111,17 @@ impl ShellState {
             .arg(pipeline)
             .stdin(Stdio::piped())
             .spawn()
-            .map_err(|e| anyhow!("Failed to spawn shell: {}", e))?;
+            .map_err(|e| anyhow!("Failed to spawn shell: {e}"))?;
 
-        // Get stdin handle
         let child_stdin = child
             .stdin
             .take()
             .ok_or_else(|| anyhow!("Failed to open stdin"))?;
         let child_fd = child_stdin.as_raw_fd();
-
-        // Save the original stdout
         let stdout_fd = std::io::stdout().as_raw_fd();
+
+        // Duplicate stdout and redirect to pipe, with proper cleanup on error
+        // SAFETY: All libc calls operate on valid file descriptors obtained from Rust types
         let saved_stdout = unsafe { libc::dup(stdout_fd) };
         if saved_stdout < 0 {
             drop(child_stdin);
@@ -129,41 +129,31 @@ impl ShellState {
             return Err(anyhow!("Failed to duplicate stdout"));
         }
 
-        // Redirect stdout to the pipe's stdin
-        let dup_result = unsafe { libc::dup2(child_fd, stdout_fd) };
-        if dup_result < 0 {
-            unsafe {
-                libc::close(saved_stdout);
-            }
+        if unsafe { libc::dup2(child_fd, stdout_fd) } < 0 {
+            unsafe { libc::close(saved_stdout) };
             drop(child_stdin);
             child.kill().ok();
             return Err(anyhow!("Failed to redirect stdout"));
         }
 
-        // Execute the command (it will write to the redirected stdout)
+        // Execute the command (writes to the redirected stdout)
         let result = self.execute_internal(command).await;
 
-        // Flush stdout to ensure all data is sent
+        // Restore stdout and clean up
         let _ = std::io::stdout().flush();
-
-        // Restore original stdout
+        // SAFETY: Restoring saved_stdout to stdout_fd, then closing the duplicate
         unsafe {
             libc::dup2(saved_stdout, stdout_fd);
-        }
-        unsafe {
             libc::close(saved_stdout);
         }
 
-        // Close the pipe to signal EOF to the child
+        // Close the pipe to signal EOF, then wait for the child
         drop(child_stdin);
-
-        // Wait for the child process
-        let _status = child
+        child
             .wait()
-            .map_err(|e| anyhow!("Failed to wait for child: {}", e))?;
+            .map_err(|e| anyhow!("Failed to wait for child: {e}"))?;
 
-        // Return the command's result
-        // Ignore the child's exit status - it's ok if grep finds nothing, head exits early, etc.
+        // Return the command's result (child exit status is intentionally ignored)
         result
     }
 

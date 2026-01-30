@@ -1,9 +1,9 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use std::io::Write;
 use std::sync::Arc;
 
 use super::{Command, ShellState};
+use super::output::{print_line, print_str};
 use crate::archive::ArchiveHandler;
 #[cfg(feature = "parquet")]
 use crate::archive::ParquetHandler;
@@ -11,34 +11,6 @@ use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
 use crate::ui::create_spinner;
 use crate::vfs::{ArchiveType, VfsNode, VirtualPath};
-
-/// Helper macro to print with BrokenPipe handling (with newline)
-macro_rules! print_line {
-    ($($arg:tt)*) => {{
-        let result = writeln!(std::io::stdout(), $($arg)*);
-        match result {
-            Ok(_) => {},
-            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }};
-}
-
-/// Helper macro to print with BrokenPipe handling (no newline)
-macro_rules! print_str {
-    ($($arg:tt)*) => {{
-        let result = write!(std::io::stdout(), $($arg)*);
-        match result {
-            Ok(_) => {},
-            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }};
-}
 
 pub struct CatCommand;
 
@@ -70,26 +42,7 @@ impl Command for CatCommand {
         match &target_node {
             VfsNode::Object { bucket, key, .. } => {
                 let bytes = state.s3_client().get_object(bucket, key).await?;
-
-                // Try to display as UTF-8 text
-                match String::from_utf8(bytes.to_vec()) {
-                    Ok(text) => print_str!("{text}"),
-                    Err(_) => {
-                        eprintln!("Warning: File contains binary data");
-                        // Display first 1KB as hex
-                        let display_len = bytes.len().min(1024);
-                        for (i, byte) in bytes[..display_len].iter().enumerate() {
-                            if i % 16 == 0 {
-                                print_str!("\n{i:08x}: ");
-                            }
-                            print_str!("{byte:02x} ");
-                        }
-                        print_line!();
-                        if bytes.len() > 1024 {
-                            eprintln!("... ({} more bytes)", bytes.len() - 1024);
-                        }
-                    }
-                }
+                Self::display_bytes(&bytes)?;
             }
 
             VfsNode::ArchiveEntry {
@@ -191,25 +144,7 @@ impl Command for CatCommand {
 
                 spinner.finish_and_clear();
 
-                // Try to display as UTF-8 text
-                match String::from_utf8(bytes.to_vec()) {
-                    Ok(text) => print_str!("{text}"),
-                    Err(_) => {
-                        eprintln!("Warning: File contains binary data");
-                        // Display first 1KB as hex
-                        let display_len = bytes.len().min(1024);
-                        for (i, byte) in bytes[..display_len].iter().enumerate() {
-                            if i % 16 == 0 {
-                                print_str!("\n{i:08x}: ");
-                            }
-                            print_str!("{byte:02x} ");
-                        }
-                        print_line!();
-                        if bytes.len() > 1024 {
-                            eprintln!("... ({} more bytes)", bytes.len() - 1024);
-                        }
-                    }
-                }
+                Self::display_bytes(&bytes)?;
             }
 
             _ => {
@@ -222,6 +157,29 @@ impl Command for CatCommand {
 }
 
 impl CatCommand {
+    /// Display file contents, handling both text and binary data.
+    /// For binary data, displays first 1KB as hex dump.
+    fn display_bytes(bytes: &[u8]) -> Result<()> {
+        match String::from_utf8(bytes.to_vec()) {
+            Ok(text) => print_str!("{text}"),
+            Err(_) => {
+                eprintln!("Warning: File contains binary data");
+                let display_len = bytes.len().min(1024);
+                for (i, byte) in bytes[..display_len].iter().enumerate() {
+                    if i % 16 == 0 {
+                        print_str!("\n{i:08x}: ");
+                    }
+                    print_str!("{byte:02x} ");
+                }
+                print_line!();
+                if bytes.len() > 1024 {
+                    eprintln!("... ({} more bytes)", bytes.len() - 1024);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Resolve absolute path to a VFS node
     async fn resolve_absolute(&self, state: &ShellState, path: &str) -> Result<VfsNode> {
         let vpath = VirtualPath::parse(path);
