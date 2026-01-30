@@ -98,7 +98,6 @@ impl ArchiveHandler for TarHandler {
         }
 
         // Add virtual directory entries to the index
-        let virtual_count = virtual_dirs.len();
         for dir_path in virtual_dirs {
             entries.insert(
                 dir_path.clone(),
@@ -418,5 +417,142 @@ mod tests {
         assert!(result.is_ok());
         let entries = result.unwrap();
         assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_virtual_directories_with_explicit_dir_entry() {
+        // Simulate an index with explicit directory entry (like wordpress-2.3.tar.gz)
+        let mut entries = HashMap::new();
+        entries.insert(
+            "wordpress/".to_string(),
+            ArchiveEntry::physical("wordpress/".to_string(), 0, 0, true),
+        );
+        entries.insert(
+            "wordpress/index.php".to_string(),
+            ArchiveEntry::physical("wordpress/index.php".to_string(), 512, 100, false),
+        );
+
+        let index = ArchiveIndex {
+            entries,
+            metadata: HashMap::new(),
+            #[cfg(feature = "parquet")]
+            parquet_store: None,
+        };
+
+        let handler = TarHandler::new(ArchiveType::Tar);
+        let results = handler.list_entries(&index, "");
+
+        // Should find the explicit wordpress/ directory
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, "wordpress/");
+        assert!(results[0].is_dir);
+    }
+
+    #[test]
+    fn test_virtual_directories_without_explicit_dir_entry() {
+        // Simulate an index without explicit directory entry (like gallery-2.2.3-full.tar.gz)
+        let mut entries = HashMap::new();
+        entries.insert(
+            "gallery2/index.php".to_string(),
+            ArchiveEntry::physical("gallery2/index.php".to_string(), 0, 100, false),
+        );
+        entries.insert(
+            "gallery2/themes/default.css".to_string(),
+            ArchiveEntry::physical("gallery2/themes/default.css".to_string(), 1024, 200, false),
+        );
+
+        let index = ArchiveIndex {
+            entries,
+            metadata: HashMap::new(),
+            #[cfg(feature = "parquet")]
+            parquet_store: None,
+        };
+
+        let handler = TarHandler::new(ArchiveType::Tar);
+        let results = handler.list_entries(&index, "");
+
+        // Should find NO entries because there's no explicit directory entry
+        // and we haven't added virtual directories yet
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_virtual_directories_added_during_build() {
+        // Test that virtual directories are added when building the index
+        use crate::vfs::ArchiveType;
+
+        let mut entries = HashMap::new();
+        // Files without explicit directory entries
+        entries.insert(
+            "gallery2/index.php".to_string(),
+            ArchiveEntry::physical("gallery2/index.php".to_string(), 0, 100, false),
+        );
+        entries.insert(
+            "gallery2/themes/default.css".to_string(),
+            ArchiveEntry::physical("gallery2/themes/default.css".to_string(), 1024, 200, false),
+        );
+
+        // Simulate the virtual directory creation logic from build_index
+        let mut virtual_dirs = std::collections::HashSet::new();
+        for (path, entry) in &entries {
+            let path_to_process = if entry.is_dir {
+                path.trim_end_matches('/')
+            } else {
+                if let Some(last_slash) = path.rfind('/') {
+                    &path[..last_slash]
+                } else {
+                    continue;
+                }
+            };
+
+            let mut current_path = String::new();
+            for component in path_to_process.split('/') {
+                if component.is_empty() {
+                    continue;
+                }
+                if !current_path.is_empty() {
+                    current_path.push('/');
+                }
+                current_path.push_str(component);
+                let dir_path = format!("{}/", current_path);
+
+                if !entries.contains_key(&dir_path) {
+                    virtual_dirs.insert(dir_path);
+                }
+            }
+        }
+
+        // Add virtual directories
+        for dir_path in virtual_dirs {
+            entries.insert(
+                dir_path.clone(),
+                ArchiveEntry::physical(dir_path, 0, 0, true),
+            );
+        }
+
+        let index = ArchiveIndex {
+            entries,
+            metadata: HashMap::new(),
+            #[cfg(feature = "parquet")]
+            parquet_store: None,
+        };
+
+        let handler = TarHandler::new(ArchiveType::Tar);
+
+        // List root - should now find gallery2/
+        let results = handler.list_entries(&index, "");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, "gallery2/");
+        assert!(results[0].is_dir);
+
+        // List gallery2/ - should find themes/ and index.php
+        let results = handler.list_entries(&index, "gallery2");
+        assert_eq!(results.len(), 2);
+
+        // Find the directory and file
+        let has_themes = results.iter().any(|e| e.path == "gallery2/themes/" && e.is_dir);
+        let has_index = results.iter().any(|e| e.path == "gallery2/index.php" && !e.is_dir);
+        assert!(has_themes, "Should have gallery2/themes/ directory");
+        assert!(has_index, "Should have gallery2/index.php file");
     }
 }
