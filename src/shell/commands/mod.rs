@@ -4,6 +4,7 @@ use async_trait::async_trait;
 pub mod cat;
 pub mod cd;
 pub mod ls;
+pub mod output;
 
 use super::ShellState;
 

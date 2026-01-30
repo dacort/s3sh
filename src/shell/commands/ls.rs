@@ -1,7 +1,9 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use colored::*;
+use std::sync::Arc;
 
+use super::output::print_line;
 use super::{Command, ShellState};
 use crate::archive::ArchiveHandler;
 #[cfg(feature = "parquet")]
@@ -9,7 +11,6 @@ use crate::archive::ParquetHandler;
 use crate::archive::tar::TarHandler;
 use crate::archive::zip::ZipHandler;
 use crate::vfs::{ArchiveType, VfsNode};
-use std::sync::Arc;
 
 pub struct LsCommand;
 
@@ -73,15 +74,15 @@ impl Command for LsCommand {
                 let buckets = state.s3_client().list_buckets().await?;
 
                 if long_format {
-                    println!("{:<30} CREATED", "NAME");
-                    println!("{}", "-".repeat(60));
+                    print_line!("{:<30} CREATED", "NAME");
+                    print_line!("{}", "-".repeat(60));
                     for bucket in buckets {
                         let created = bucket.creation_date.unwrap_or_else(|| "-".to_string());
-                        println!("{:<30} {}", bucket.name.blue().bold(), created);
+                        print_line!("{:<30} {}", bucket.name.blue().bold(), created);
                     }
                 } else {
                     for bucket in buckets {
-                        println!("{}/", bucket.name.blue().bold());
+                        print_line!("{}/", bucket.name.blue().bold());
                     }
                 }
             }
@@ -91,8 +92,8 @@ impl Command for LsCommand {
                 let result = state.s3_client().list_objects(name, "", Some("/")).await?;
 
                 if long_format {
-                    println!("{:<50} {:>12} MODIFIED", "NAME", "SIZE");
-                    println!("{}", "-".repeat(80));
+                    print_line!("{:<50} {:>12} MODIFIED", "NAME", "SIZE");
+                    print_line!("{}", "-".repeat(80));
 
                     // Print prefixes (directories)
                     for prefix in &result.prefixes {
@@ -102,7 +103,7 @@ impl Command for LsCommand {
                             .next()
                             .unwrap_or(prefix);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!(
+                            print_line!(
                                 "{:<50} {:>12} -",
                                 format!("{display_name}/").blue().bold(),
                                 "-"
@@ -115,7 +116,7 @@ impl Command for LsCommand {
                         let display_name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
                         if Self::should_display(display_name, &filter_pattern) {
                             let modified = obj.last_modified.as_deref().unwrap_or("-");
-                            println!(
+                            print_line!(
                                 "{:<50} {:>12} {}",
                                 display_name,
                                 humansize::format_size(obj.size, humansize::BINARY),
@@ -132,7 +133,7 @@ impl Command for LsCommand {
                             .next()
                             .unwrap_or(prefix);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!("{}/", display_name.blue().bold());
+                            print_line!("{}/", display_name.blue().bold());
                         }
                     }
 
@@ -140,7 +141,7 @@ impl Command for LsCommand {
                     for obj in &result.objects {
                         let display_name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!("{display_name}");
+                            print_line!("{display_name}");
                         }
                     }
                 }
@@ -154,14 +155,14 @@ impl Command for LsCommand {
                     .await?;
 
                 if long_format {
-                    println!("{:<50} {:>12} MODIFIED", "NAME", "SIZE");
-                    println!("{}", "-".repeat(80));
+                    print_line!("{:<50} {:>12} MODIFIED", "NAME", "SIZE");
+                    print_line!("{}", "-".repeat(80));
 
                     // Print prefixes (directories)
                     for p in &result.prefixes {
                         let display_name = p.trim_end_matches('/').rsplit('/').next().unwrap_or(p);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!(
+                            print_line!(
                                 "{:<50} {:>12} -",
                                 format!("{display_name}/").blue().bold(),
                                 "-"
@@ -174,7 +175,7 @@ impl Command for LsCommand {
                         let display_name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
                         if Self::should_display(display_name, &filter_pattern) {
                             let modified = obj.last_modified.as_deref().unwrap_or("-");
-                            println!(
+                            print_line!(
                                 "{:<50} {:>12} {}",
                                 display_name,
                                 humansize::format_size(obj.size, humansize::BINARY),
@@ -187,7 +188,7 @@ impl Command for LsCommand {
                     for p in &result.prefixes {
                         let display_name = p.trim_end_matches('/').rsplit('/').next().unwrap_or(p);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!("{}/", display_name.blue().bold());
+                            print_line!("{}/", display_name.blue().bold());
                         }
                     }
 
@@ -195,7 +196,7 @@ impl Command for LsCommand {
                     for obj in &result.objects {
                         let display_name = obj.key.rsplit('/').next().unwrap_or(&obj.key);
                         if Self::should_display(display_name, &filter_pattern) {
-                            println!("{display_name}");
+                            print_line!("{display_name}");
                         }
                     }
                 }
@@ -261,8 +262,8 @@ impl Command for LsCommand {
                 };
 
                 if long_format {
-                    println!("{:<50} {:>12}", "NAME", "SIZE");
-                    println!("{}", "-".repeat(65));
+                    print_line!("{:<50} {:>12}", "NAME", "SIZE");
+                    print_line!("{}", "-".repeat(65));
 
                     for entry in entries {
                         let base_name = entry
@@ -288,9 +289,9 @@ impl Command for LsCommand {
                         };
 
                         if entry.is_dir {
-                            println!("{:<50} {:>12}", display_name.blue().bold(), size_str);
+                            print_line!("{:<50} {:>12}", display_name.blue().bold(), size_str);
                         } else {
-                            println!("{display_name:<50} {size_str:>12}");
+                            print_line!("{display_name:<50} {size_str:>12}");
                         }
                     }
                 } else {
@@ -312,9 +313,9 @@ impl Command for LsCommand {
                         };
 
                         if entry.is_dir {
-                            println!("{}", display_name.blue().bold());
+                            print_line!("{}", display_name.blue().bold());
                         } else {
-                            println!("{display_name}");
+                            print_line!("{display_name}");
                         }
                     }
                 }
@@ -396,8 +397,8 @@ impl Command for LsCommand {
                 };
 
                 if long_format {
-                    println!("{:<50} {:>12}", "NAME", "SIZE");
-                    println!("{}", "-".repeat(65));
+                    print_line!("{:<50} {:>12}", "NAME", "SIZE");
+                    print_line!("{}", "-".repeat(65));
 
                     for entry in entries {
                         let full_path = &entry.path;
@@ -423,9 +424,9 @@ impl Command for LsCommand {
                         };
 
                         if entry.is_dir {
-                            println!("{:<50} {:>12}", display_name.blue().bold(), size_str);
+                            print_line!("{:<50} {:>12}", display_name.blue().bold(), size_str);
                         } else {
-                            println!("{display_name:<50} {size_str:>12}");
+                            print_line!("{display_name:<50} {size_str:>12}");
                         }
                     }
                 } else {
@@ -447,9 +448,9 @@ impl Command for LsCommand {
                         };
 
                         if entry.is_dir {
-                            println!("{}", display_name.blue().bold());
+                            print_line!("{}", display_name.blue().bold());
                         } else {
-                            println!("{display_name}");
+                            print_line!("{display_name}");
                         }
                     }
                 }
