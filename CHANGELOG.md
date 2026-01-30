@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/dacort/s3sh/compare/v0.1.2...v0.2.0) - 2026-01-30
+
+### Added
+
+- Allow piping to the shell ([#13](https://github.com/dacort/s3sh/pull/13))
+- Initial parquet support ([#11](https://github.com/dacort/s3sh/pull/11))
+
+### Fixed
+
+- zip performance ([#18](https://github.com/dacort/s3sh/pull/18))
+
+### Other
+
+- Improve tar listing memory efficiency with streaming ([#16](https://github.com/dacort/s3sh/pull/16))
+- Add perf tests ([#17](https://github.com/dacort/s3sh/pull/17))
+
 ### Added
 - Unix-style pipe support for streaming command output to external tools
   - Pipe `ls` output to `grep`, `sort`, `head`, etc.
