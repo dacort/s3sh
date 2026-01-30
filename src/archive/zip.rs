@@ -262,6 +262,33 @@ impl ZipHandler {
                 }
 
                 // Parse EOCD fields (all little endian)
+                // Offset 4: Number of this disk (2 bytes)
+                // Offset 6: Disk where central directory starts (2 bytes)
+                // Offset 8: Number of central directory records on this disk (2 bytes)
+                // Offset 10: Total number of central directory records (2 bytes)
+                let disk_number = u16::from_le_bytes([eocd[4], eocd[5]]);
+                let disk_with_cd = u16::from_le_bytes([eocd[6], eocd[7]]);
+                let num_entries_this_disk = u16::from_le_bytes([eocd[8], eocd[9]]);
+                let num_entries_total = u16::from_le_bytes([eocd[10], eocd[11]]);
+
+                // Multi-disk ZIP archives are not supported
+                if disk_number != 0 || disk_with_cd != 0 {
+                    return Err(anyhow!(
+                        "Multi-disk ZIP archives are not supported (disk_number={}, disk_with_cd={})",
+                        disk_number,
+                        disk_with_cd
+                    ));
+                }
+
+                // Validate that entry counts match (another indicator of multi-disk archives)
+                if num_entries_this_disk != num_entries_total {
+                    return Err(anyhow!(
+                        "Multi-disk ZIP archives are not supported (entries_this_disk={}, entries_total={})",
+                        num_entries_this_disk,
+                        num_entries_total
+                    ));
+                }
+
                 // Offset 12: Size of central directory (4 bytes)
                 // Offset 16: Offset of central directory (4 bytes)
                 let central_dir_size =
