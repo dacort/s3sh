@@ -564,4 +564,111 @@ mod tests {
         let entry = entries.get("dir/").unwrap();
         assert!(entry.is_dir);
     }
+
+    #[test]
+    fn test_find_eocd_rejects_non_zero_disk_number() {
+        // Create EOCD with non-zero disk number
+        let mut data = vec![0u8; MIN_EOCD_SIZE];
+        
+        // Place EOCD signature at position 0
+        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
+        
+        // Set disk number (offset 4) to 1 (non-zero)
+        data[4..6].copy_from_slice(&1u16.to_le_bytes());
+        
+        // Set other fields to valid values
+        data[6..8].copy_from_slice(&0u16.to_le_bytes());  // disk_with_cd = 0
+        data[8..10].copy_from_slice(&10u16.to_le_bytes()); // num_entries_this_disk = 10
+        data[10..12].copy_from_slice(&10u16.to_le_bytes()); // num_entries_total = 10
+        data[12..16].copy_from_slice(&500u32.to_le_bytes()); // central_dir_size
+        data[16..20].copy_from_slice(&1000u32.to_le_bytes()); // central_dir_offset
+
+        let result = ZipHandler::find_eocd(&data, 0);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Multi-disk ZIP archives are not supported"));
+        assert!(err.to_string().contains("disk_number=1"));
+    }
+
+    #[test]
+    fn test_find_eocd_rejects_non_zero_disk_with_cd() {
+        // Create EOCD with non-zero disk_with_cd
+        let mut data = vec![0u8; MIN_EOCD_SIZE];
+        
+        // Place EOCD signature at position 0
+        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
+        
+        // Set disk number (offset 4) to 0
+        data[4..6].copy_from_slice(&0u16.to_le_bytes());
+        
+        // Set disk_with_cd (offset 6) to 2 (non-zero)
+        data[6..8].copy_from_slice(&2u16.to_le_bytes());
+        
+        // Set other fields to valid values
+        data[8..10].copy_from_slice(&10u16.to_le_bytes()); // num_entries_this_disk = 10
+        data[10..12].copy_from_slice(&10u16.to_le_bytes()); // num_entries_total = 10
+        data[12..16].copy_from_slice(&500u32.to_le_bytes()); // central_dir_size
+        data[16..20].copy_from_slice(&1000u32.to_le_bytes()); // central_dir_offset
+
+        let result = ZipHandler::find_eocd(&data, 0);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Multi-disk ZIP archives are not supported"));
+        assert!(err.to_string().contains("disk_with_cd=2"));
+    }
+
+    #[test]
+    fn test_find_eocd_rejects_mismatched_entry_counts() {
+        // Create EOCD with mismatched entry counts
+        let mut data = vec![0u8; MIN_EOCD_SIZE];
+        
+        // Place EOCD signature at position 0
+        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
+        
+        // Set disk fields to 0
+        data[4..6].copy_from_slice(&0u16.to_le_bytes()); // disk_number = 0
+        data[6..8].copy_from_slice(&0u16.to_le_bytes()); // disk_with_cd = 0
+        
+        // Set mismatched entry counts
+        data[8..10].copy_from_slice(&5u16.to_le_bytes()); // num_entries_this_disk = 5
+        data[10..12].copy_from_slice(&10u16.to_le_bytes()); // num_entries_total = 10
+        
+        // Set other fields to valid values
+        data[12..16].copy_from_slice(&500u32.to_le_bytes()); // central_dir_size
+        data[16..20].copy_from_slice(&1000u32.to_le_bytes()); // central_dir_offset
+
+        let result = ZipHandler::find_eocd(&data, 0);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Multi-disk ZIP archives are not supported"));
+        assert!(err.to_string().contains("entries_this_disk=5"));
+        assert!(err.to_string().contains("entries_total=10"));
+    }
+
+    #[test]
+    fn test_find_eocd_accepts_valid_single_disk_archive() {
+        // Create a valid single-disk EOCD
+        let mut data = vec![0u8; MIN_EOCD_SIZE];
+        
+        // Place EOCD signature at position 0
+        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
+        
+        // Set all disk fields to 0
+        data[4..6].copy_from_slice(&0u16.to_le_bytes()); // disk_number = 0
+        data[6..8].copy_from_slice(&0u16.to_le_bytes()); // disk_with_cd = 0
+        
+        // Set matching entry counts
+        data[8..10].copy_from_slice(&10u16.to_le_bytes()); // num_entries_this_disk = 10
+        data[10..12].copy_from_slice(&10u16.to_le_bytes()); // num_entries_total = 10
+        
+        // Set other fields to valid values
+        data[12..16].copy_from_slice(&500u32.to_le_bytes()); // central_dir_size
+        data[16..20].copy_from_slice(&1000u32.to_le_bytes()); // central_dir_offset
+
+        let result = ZipHandler::find_eocd(&data, 0);
+        assert!(result.is_ok());
+        let info = result.unwrap();
+        assert_eq!(info.central_dir_size, 500);
+        assert_eq!(info.central_dir_offset, 1000);
+    }
 }
