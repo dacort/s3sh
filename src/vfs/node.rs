@@ -46,8 +46,19 @@ impl ArchiveType {
 /// Represents different types of archive entries
 #[derive(Debug, Clone)]
 pub enum EntryType {
-    /// Physical archive entry (tar/zip) with file offset
+    /// Physical archive entry (tar) with file offset
     Physical { offset: u64 },
+    /// ZIP archive entry with metadata for efficient extraction
+    ZipEntry {
+        /// Offset of the local file header in the archive
+        local_header_offset: u64,
+        /// Compressed size of the file data
+        compressed_size: u64,
+        /// Compression method (0 = stored, 8 = deflate)
+        compression_method: u16,
+        /// CRC-32 checksum for data integrity verification
+        crc32: u32,
+    },
     /// Virtual entry for Parquet files
     #[cfg(feature = "parquet")]
     ParquetVirtual { handler: ParquetEntryHandler },
@@ -80,13 +91,36 @@ pub struct ArchiveEntry {
 }
 
 impl ArchiveEntry {
-    /// Create a physical archive entry (for tar/zip)
+    /// Create a physical archive entry (for tar)
     pub fn physical(path: String, offset: u64, size: u64, is_dir: bool) -> Self {
         Self {
             path,
             size,
             is_dir,
             entry_type: EntryType::Physical { offset },
+        }
+    }
+
+    /// Create a ZIP archive entry with extraction metadata
+    pub fn zip_entry(
+        path: String,
+        size: u64,
+        is_dir: bool,
+        local_header_offset: u64,
+        compressed_size: u64,
+        compression_method: u16,
+        crc32: u32,
+    ) -> Self {
+        Self {
+            path,
+            size,
+            is_dir,
+            entry_type: EntryType::ZipEntry {
+                local_header_offset,
+                compressed_size,
+                compression_method,
+                crc32,
+            },
         }
     }
 

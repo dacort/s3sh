@@ -145,6 +145,9 @@ impl ArchiveHandler for TarHandler {
         let archive_type = self.archive_type.clone();
         let entry_offset = match &entry.entry_type {
             crate::vfs::EntryType::Physical { offset } => *offset,
+            crate::vfs::EntryType::ZipEntry { .. } => {
+                unreachable!("Tar archives should never contain ZipEntry entries")
+            }
             #[cfg(feature = "parquet")]
             crate::vfs::EntryType::ParquetVirtual { .. } => {
                 unreachable!("Tar archives should never contain ParquetVirtual entries")
