@@ -387,20 +387,15 @@ impl ZipHandler {
                 .and_then(|v| v.checked_add(extra_len))
                 .and_then(|v| v.checked_add(comment_len))
                 .ok_or_else(|| {
-                    anyhow!(
-                        "Central directory entry size overflow at position {}",
-                        pos
-                    )
+                    anyhow!("Central directory entry size overflow at position {}", pos)
                 })?;
 
-            let end = pos
-                .checked_add(total_entry_size)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Central directory entry position overflow at position {}",
-                        pos
-                    )
-                })?;
+            let end = pos.checked_add(total_entry_size).ok_or_else(|| {
+                anyhow!(
+                    "Central directory entry position overflow at position {}",
+                    pos
+                )
+            })?;
 
             if end > data.len() {
                 return Err(anyhow!(
