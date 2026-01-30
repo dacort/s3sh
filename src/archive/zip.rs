@@ -27,6 +27,11 @@ const LOCAL_HEADER_MIN_SIZE: usize = 30;
 const COMPRESSION_STORED: u16 = 0;
 const COMPRESSION_DEFLATE: u16 = 8;
 
+/// Maximum allowed uncompressed size for a single file (1GB)
+/// This protects against zip bomb attacks where a malicious ZIP file
+/// claims a huge uncompressed size but has a small compressed size.
+const MAX_UNCOMPRESSED_SIZE: u64 = 1024 * 1024 * 1024;
+
 pub struct ZipHandler;
 
 /// Information extracted from the End of Central Directory record
@@ -135,6 +140,15 @@ impl ArchiveHandler for ZipHandler {
         // Calculate actual data offset
         let data_offset =
             local_header_offset + LOCAL_HEADER_MIN_SIZE as u64 + filename_len + extra_len;
+
+        // Validate uncompressed size to protect against zip bombs
+        if entry.size > MAX_UNCOMPRESSED_SIZE {
+            return Err(anyhow!(
+                "File too large to decompress: {} bytes (max allowed: {} bytes). This may be a zip bomb attack.",
+                entry.size,
+                MAX_UNCOMPRESSED_SIZE
+            ));
+        }
 
         // Read just the compressed data
         let compressed_data = if compressed_size > 0 {
@@ -555,5 +569,41 @@ mod tests {
         let entries = ZipHandler::parse_central_directory(&data).unwrap();
         let entry = entries.get("dir/").unwrap();
         assert!(entry.is_dir);
+    }
+
+    #[test]
+    fn test_parse_central_directory_with_oversized_file() {
+        // Create a central directory entry with an uncompressed size exceeding MAX_UNCOMPRESSED_SIZE
+        let mut data = vec![0u8; 60];
+
+        // CDFH signature
+        data[0..4].copy_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
+
+        // Compression method: deflate
+        data[10..12].copy_from_slice(&8u16.to_le_bytes());
+
+        // Compressed size: 1KB (small compressed size)
+        data[20..24].copy_from_slice(&1024u32.to_le_bytes());
+
+        // Uncompressed size: 2GB (exceeds MAX_UNCOMPRESSED_SIZE of 1GB)
+        let oversized = 2u64 * 1024 * 1024 * 1024;
+        data[24..28].copy_from_slice(&(oversized as u32).to_le_bytes());
+
+        // Filename length: 8 ("bomb.txt")
+        data[28..30].copy_from_slice(&8u16.to_le_bytes());
+        data[30..32].copy_from_slice(&0u16.to_le_bytes());
+        data[32..34].copy_from_slice(&0u16.to_le_bytes());
+
+        // Local header offset
+        data[42..46].copy_from_slice(&0u32.to_le_bytes());
+
+        // Filename: "bomb.txt"
+        data[46..54].copy_from_slice(b"bomb.txt");
+
+        // This should successfully parse the central directory (size check happens during extraction)
+        let entries = ZipHandler::parse_central_directory(&data).unwrap();
+        let entry = entries.get("bomb.txt").unwrap();
+        assert_eq!(entry.size, oversized);
+        assert!(!entry.is_dir);
     }
 }
