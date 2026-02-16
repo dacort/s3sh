@@ -38,6 +38,9 @@ async fn main() -> Result<()> {
         .get(&args.provider)
         .ok_or_else(|| anyhow::anyhow!("Unknown provider: {}", args.provider))?;
 
+    // Create provider configuration first to check for custom endpoints
+    let provider_config = provider.build_config().await?;
+
     // Print welcome message with provider info
     println!("{}", "=".repeat(60).cyan());
     println!("{}", "  s3sh - The S3 Shell".bold().cyan());
@@ -48,12 +51,14 @@ async fn main() -> Result<()> {
         provider.name().bold(),
         provider.description()
     );
+    if let Some(endpoint) = &provider_config.endpoint_url {
+        println!("Endpoint: {}", endpoint.bold());
+    }
     println!();
     println!("Type 'help' for available commands or 'exit' to quit");
     println!();
 
     // Create S3 client from provider
-    let provider_config = provider.build_config().await?;
     let (client, region, disable_cross_region) =
         match providers::create_s3_client(provider_config).await {
             Ok(result) => result,
