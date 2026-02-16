@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/dacort/s3sh/compare/v0.2.0...v0.2.1) - 2026-02-16
+
+### Fixed
+
+- custom S3 endpoint support by detecting AWS_ENDPOINT_URL ([#23](https://github.com/dacort/s3sh/pull/23))
+
 ## [0.2.0](https://github.com/dacort/s3sh/compare/v0.1.2...v0.2.0) - 2026-01-30
 
 ### Added
