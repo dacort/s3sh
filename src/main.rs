@@ -18,6 +18,10 @@ struct Args {
     /// List available providers and exit
     #[arg(long)]
     list_providers: bool,
+
+    /// S3 URL to start in (e.g. s3://bucket/prefix)
+    #[arg(value_name = "S3_URL")]
+    url: Option<String>,
 }
 
 #[tokio::main]
@@ -84,6 +88,26 @@ async fn main() -> Result<()> {
 
     // Initialize shell state with the client
     let mut state = shell::ShellState::with_client(s3_client).await?;
+
+    // Navigate to initial URL if provided
+    if let Some(url) = &args.url {
+        let path = url
+            .strip_prefix("s3://")
+            .unwrap_or(url)
+            .trim_end_matches('/');
+        if !path.is_empty() {
+            let cd_path = format!("/{path}");
+            if let Err(e) = state.execute(&format!("cd {cd_path}")).await {
+                eprintln!(
+                    "{} Failed to navigate to {}: {}",
+                    "Error:".red().bold(),
+                    url,
+                    e
+                );
+                std::process::exit(1);
+            }
+        }
+    }
 
     // Create readline editor with tab completion
     let completer = shell::ShellCompleter::new(state.completion_cache().clone());
